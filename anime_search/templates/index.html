@@ -262,9 +262,15 @@
 
     <div class="loading-overlay" data-loading hidden>
       <div class="loading-box">
-        <div class="loader big"></div>
-        <span class="loading-title">Searching anime databases...</span>
-        <span class="loading-sub">Finding the best matches for you</span>
+        <div class="fox-ai-loader">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="fox-svg">
+            <path d="M19 4l-4 3-3-3-3 3-4-3c0 6 2 11 5 13l2 2 2-2c3-2 5-7 5-13z"/>
+            <path d="M9 13l1 1 M15 13l-1 1"/>
+            <circle cx="12" cy="18" r="1" fill="currentColor"/>
+          </svg>
+        </div>
+        <span class="loading-title">Fox AI is thinking...</span>
+        <span class="loading-sub">Searching anime databases for matches</span>
       </div>
     </div>
     <div id="profile-data" data-profile="{{ profile|tojson if profile else '' }}" hidden></div>

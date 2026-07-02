@@ -21,6 +21,7 @@ from anime_search.tools import (
     web_search_wikipedia,
     web_search_fandom,
 )
+from anime_search.anime_index import get_anime_index
 
 log = logging.getLogger(__name__)
 
@@ -136,9 +137,24 @@ You MUST NOT rely only on model memory.
 
 ---
 
-## CORE BEHAVIOR
+## TOKEN-EFFICIENT INDEX SYSTEM
 
-You act as a DATA AGGREGATION ENGINE, not a storyteller.
+ALL anime are stored in a local database with NUMERIC IDs.
+When you find anime, use their INDEX IDs to reference them.
+
+FORMAT: [ID] Title (Score) - e.g. [42] Naruto (8.5)
+
+In your final JSON response, use "index_id" field for each anime:
+```json
+{
+  "rank": 1,
+  "index_id": 42,
+  "title": "Naruto",
+  "rating": 85
+}
+```
+
+This saves tokens because the frontend can look up full data by ID.
 
 ---
 
@@ -155,20 +171,33 @@ You MUST analyze these web results FIRST before doing anything else.
 
 You are FREE to use ANY tools you need:
 
-- web_search_anime(query) — Search DuckDuckGo again for more specific info
-- web_search_wikipedia(query) — Search Wikipedia for more details
-- web_search_fandom(query) — Search Fandom for wiki lore
-- search_anime_by_title(title) — Search MAL by exact title
+- web_search_anime(query) — Search DuckDuckGo again
+- web_search_wikipedia(query) — Search Wikipedia again
+- web_search_fandom(query) — Search Fandom again
+- search_anime_by_title(title) — Search MAL
 - search_anime_by_genre(genre) — Search by genre
-- search_anime_multi_api(query) — Search all APIs at once
-- search_by_description_keywords(desc) — Parse description and search
+- search_anime_multi_api(query) — Search all APIs
+- search_by_description_keywords(desc) — Parse description
 - get_anime_details(title) — Get full details
-- get_anime_recommendations(title) — Get recommendations
 - semantic_search(query) — Semantic search
 - hybrid_recommend(query) — Hybrid recommendation
-- web_fetch_url(url) — Fetch a specific URL for more info
 
-Use whatever tools give you the BEST results. You have full freedom.
+Use whatever tools give you the BEST results.
+
+---
+
+## COMMENTARY FORMAT
+
+As you work, output short commentary lines prefixed with "##" so the user can see your thinking:
+
+Example:
+## Searching DuckDuckGo for "space western anime"...
+## Found 5 results from DuckDuckGo
+## Searching Wikipedia for Cowboy Bebop...
+## Found detailed article on Wikipedia
+## Analyzing genre match: Action, Sci-Fi, Space
+## Rating Cowboy Bebop: 92% similarity
+## Adding [42] Cowboy Bebop to results
 
 ---
 
@@ -180,9 +209,11 @@ Always output structured result as JSON:
 {
   "engine": "agent",
   "source_title": "query or title",
+  "commentary": ["line 1", "line 2", ...],
   "top_50": [
     {
       "rank": 1,
+      "index_id": 42,
       "title": "Anime Title",
       "type": "TV",
       "score": 8.5,
@@ -253,12 +284,14 @@ SIMILARITY SCALE:
 - Be HARSH with ratings - most anime are NOT identical
 - Only 99-90% for truly identical anime
 - Most good matches are 70-80%, not 90%+
+- ALWAYS include index_id for each anime in top_50
 
 ---
 
 ## FINAL GOAL
 
 Combine web knowledge + API data + local database into the BEST possible recommendations.
+Use index IDs to save tokens. Output commentary so users see your thinking.
 
 Return ONLY the JSON response. No other text.
 """
@@ -277,6 +310,7 @@ class AnimeAgent:
         profile: UnifiedAnimeProfile | None = None,
         on_tool_call: Any = None,
         on_progress: Any = None,
+        on_commentary: Any = None,
     ) -> dict[str, Any]:
         if len(self.kb) < 50:
             log.info("Knowledge base too small (%d entries), auto-populating...", len(self.kb))
@@ -284,6 +318,8 @@ class AnimeAgent:
 
         if on_progress:
             await on_progress(0, [], "Pre-searching DuckDuckGo, Wikipedia, Fandom...")
+        if on_commentary:
+            await on_commentary("## Pre-searching DuckDuckGo, Wikipedia, Fandom...")
 
         web_results = await self._pre_search_web(query, user_description)
 
@@ -291,6 +327,17 @@ class AnimeAgent:
             await on_tool_call("web_search_anime", {"query": query}, "done", web_results.get("duckduckgo"))
             await on_tool_call("web_search_wikipedia", {"query": query}, "done", web_results.get("wikipedia"))
             await on_tool_call("web_search_fandom", {"query": query}, "done", web_results.get("fandom"))
+
+        if on_commentary:
+            ddg_count = len(web_results.get("duckduckgo", []))
+            wiki_count = len(web_results.get("wikipedia", []))
+            fandom_count = len(web_results.get("fandom", []))
+            await on_commentary(f"## Found {ddg_count} DuckDuckGo, {wiki_count} Wikipedia, {fandom_count} Fandom results")
+
+        index = get_anime_index()
+        index_count = index.count()
+        if on_commentary:
+            await on_commentary(f"## Anime index loaded: {index_count} entries in DB")
 
         base_url = self.settings.effective_ai_base_url.rstrip("/")
         url = f"{base_url}/v1/chat/completions"
@@ -311,6 +358,8 @@ class AnimeAgent:
         for iteration in range(self.settings.agent_max_iterations):
             if on_progress:
                 await on_progress(iteration, self.tool_calls_log, accumulated_text)
+            if on_commentary:
+                await on_commentary(f"## AI thinking... (step {iteration + 1})")
 
             payload = {
                 "model": self.settings.effective_ai_model,
@@ -328,6 +377,8 @@ class AnimeAgent:
                     response_data = response.json()
             except Exception as exc:
                 log.warning("Agent LLM call failed at iteration %d: %s", iteration, exc)
+                if on_commentary:
+                    await on_commentary(f"## LLM call failed: {exc}")
                 break
 
             choice = response_data.get("choices", [{}])[0]
@@ -337,16 +388,37 @@ class AnimeAgent:
 
             if content:
                 accumulated_text += content
+                if on_commentary:
+                    lines = [l for l in content.split("\n") if l.strip().startswith("##")]
+                    for line in lines:
+                        await on_commentary(line)
 
             if not tool_calls:
                 if content:
                     result = self._parse_final_response(content, accumulated_text)
                     if result.get("top_50"):
+                        for item in result["top_50"]:
+                            title = item.get("title", "")
+                            idx = index.add({
+                                "title": title,
+                                "score": item.get("score"),
+                                "genres": item.get("genres", []),
+                                "synopsis": item.get("synopsis", ""),
+                                "episodes": item.get("episodes"),
+                                "type": item.get("type", ""),
+                                "status": item.get("status", ""),
+                            })
+                            item["index_id"] = idx
+                        if on_commentary:
+                            await on_commentary(f"## Final result: {len(result['top_50'])} anime found")
+                        result["commentary"] = accumulated_text.split("\n")
                         return result
                 break
 
             if total_tool_calls >= self.settings.agent_max_tool_calls:
                 log.warning("Agent hit tool call limit (%d)", self.settings.agent_max_tool_calls)
+                if on_commentary:
+                    await on_commentary(f"## Hit tool call limit ({self.settings.agent_max_tool_calls})")
                 break
 
             messages.append(message)
@@ -359,6 +431,8 @@ class AnimeAgent:
                 except json.JSONDecodeError:
                     args = {}
 
+                if on_commentary:
+                    await on_commentary(f"## Using tool: {tool_name}({json.dumps(args)[:100]})")
                 if on_tool_call:
                     await on_tool_call(tool_name, args, "running")
 
@@ -371,6 +445,9 @@ class AnimeAgent:
                     "timestamp": time.time(),
                 })
 
+                if on_commentary:
+                    result_summary = str(result)[:100]
+                    await on_commentary(f"## Tool {tool_name} returned: {result_summary}")
                 if on_tool_call:
                     await on_tool_call(tool_name, args, "done", result)
 

@@ -478,6 +478,7 @@ async def agent_recommend(
     user_description: str = "",
     on_tool_call: Any = None,
     on_progress: Any = None,
+    on_commentary: Any = None,
 ) -> dict[str, Any]:
     from anime_search.agent import AnimeAgent
     agent = AnimeAgent(settings)
@@ -485,4 +486,4 @@ async def agent_recommend(
     if user_description:
         desc = f"{desc}\n\nUser context: {user_description}" if desc else user_description
     query = profile.query or profile.titles.get("all", [""])[0] or desc[:80]
-    return await agent.research(query, user_description or desc, profile=profile, on_tool_call=on_tool_call, on_progress=on_progress)
+    return await agent.research(query, user_description or desc, profile=profile, on_tool_call=on_tool_call, on_progress=on_progress, on_commentary=on_commentary)

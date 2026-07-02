@@ -847,22 +847,29 @@ TOOL_EXECUTORS: dict[str, Any] = {
 async def web_search_anime(query: str) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(10, connect=3.0), follow_redirects=True) as client:
-            resp = await client.get(
-                "https://html.duckduckgo.com/html/",
-                params={"q": f"anime {query}"},
+            resp = await client.post(
+                "https://lite.duckduckgo.com/lite/",
+                data={"q": f"anime {query}"},
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
             )
             resp.raise_for_status()
             text = resp.text
             results = []
             import re
-            for match in re.finditer(r'class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?class="result__snippet"[^>]*>(.*?)</span>', text, re.DOTALL):
-                url, title, snippet = match.groups()
-                title = re.sub(r'<[^>]+>', '', title).strip()
-                snippet = re.sub(r'<[^>]+>', '', snippet).strip()
+            import html
+            links = re.findall(r'href=[\'"]([^\'"]+)[\'"][^>]*class=[\'"]result-link[\'"][^>]*>(.*?)</a>', text, re.IGNORECASE)
+            snippets = re.findall(r'<td[^>]*class=[\'"]result-snippet[\'"][^>]*>(.*?)</td>', text, re.IGNORECASE | re.DOTALL)
+            for i in range(min(10, len(links))):
+                url = links[i][0]
+                title = re.sub(r'<[^>]+>', '', links[i][1]).strip()
+                title = html.unescape(title)
+                snippet = ""
+                if i < len(snippets):
+                    snippet = re.sub(r'<[^>]+>', '', snippets[i]).strip()
+                    snippet = html.unescape(snippet)
                 if title and url:
                     results.append({"title": title, "snippet": snippet, "url": url})
-            return {"results": results[:10]}
+            return {"results": results}
     except Exception as exc:
         return {"error": str(exc)}
 

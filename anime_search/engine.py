@@ -223,6 +223,8 @@ class AnimeSearchEngine:
 
         _update_task(task_id, progress=30, message="Agent researching...")
 
+        commentary_log: list[str] = []
+
         async def on_tool_call(tool_name: str, args: dict, status: str, result: Any = None) -> None:
             task_data = _get_task(task_id) or {}
             calls = task_data.get("tool_calls", [])
@@ -234,9 +236,13 @@ class AnimeSearchEngine:
         async def on_progress(iteration: int, calls: list, text: str) -> None:
             _update_task(task_id, progress=min(85, 25 + iteration * 4), message=f"Agent researching... (step {iteration + 1})")
 
+        async def on_commentary(line: str) -> None:
+            commentary_log.append(line)
+            _update_task(task_id, commentary=commentary_log[:], message=line)
+
         try:
             log.info("Background task %s: starting agent recommend", task_id)
-            ai_result = await agent_recommend(profile, self.settings, user_description, on_tool_call=on_tool_call, on_progress=on_progress)
+            ai_result = await agent_recommend(profile, self.settings, user_description, on_tool_call=on_tool_call, on_progress=on_progress, on_commentary=on_commentary)
             log.info("Background task %s: agent returned, top_50 count=%d", task_id, len(ai_result.get("top_50", [])))
             recommendation = normalize_ai_recommendations(ai_result, profile)
             recommendation["engine"] = "agent"

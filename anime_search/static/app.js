@@ -143,6 +143,10 @@ function buildResultSection() {
           </div>
           <div class="status-detail" id="ai-status-detail"></div>
         </div>
+        <div class="ai-commentary-box" id="ai-commentary-box">
+          <div class="commentary-header">AI Thinking...</div>
+          <div class="commentary-lines" id="commentary-lines"></div>
+        </div>
       </article>
       <article class="panel wide" id="ai-recommendations">
         <div class="rec-section-header">
@@ -200,6 +204,10 @@ function listenToStream(taskId) {
       const data = JSON.parse(event.data);
       updateStatus(data.progress || 0, data.message || "", data.count > 0 ? `${data.count} found` : "");
 
+      if (data.commentary && Array.isArray(data.commentary)) {
+        updateCommentary(data.commentary);
+      }
+
       if (data.latest) {
         appendRecommendation(data.latest);
       }
@@ -222,6 +230,20 @@ function listenToStream(taskId) {
     currentEventSource = null;
     setTimeout(() => pollTaskStatus(taskId), 1000);
   };
+}
+
+function updateCommentary(lines) {
+  const container = document.getElementById("commentary-lines");
+  if (!container) return;
+  container.innerHTML = "";
+  const recent = lines.slice(-15);
+  for (const line of recent) {
+    const div = document.createElement("div");
+    div.className = "commentary-line";
+    div.textContent = line.replace(/^##\s*/, "");
+    container.appendChild(div);
+  }
+  container.scrollTop = container.scrollHeight;
 }
 
 function pollTaskStatus(taskId) {

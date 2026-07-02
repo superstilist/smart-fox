@@ -122,7 +122,11 @@ async def fetch_anime_detail(
 
 
 def create_app() -> Flask:
-    app = Flask(__name__)
+    app = Flask(
+        __name__,
+        template_folder="anime_search/templates",
+        static_folder="anime_search/static",
+    )
     engine = AnimeSearchEngine()
 
     @app.get("/")
@@ -212,8 +216,9 @@ def create_app() -> Flask:
                 message = task.get("message", "")
                 results = task.get("results", [])
                 raw_text = task.get("raw_text", "")
+                commentary = task.get("commentary", [])
                 now = time.time()
-                if now - last_update >= 0.3 or status in ("done", "error"):
+                if now - last_update >= 0.2 or status in ("done", "error"):
                     payload = {
                         "status": status,
                         "progress": progress,
@@ -224,11 +229,13 @@ def create_app() -> Flask:
                         payload["latest"] = results[-1]
                     if raw_text:
                         payload["raw_length"] = len(raw_text)
+                    if commentary:
+                        payload["commentary"] = commentary[-20:]
                     yield f"data: {json.dumps(payload)}\n\n"
                     last_update = now
                 if status in ("done", "error"):
                     return
-                time.sleep(0.25)
+                time.sleep(0.2)
 
         return Response(generate(), mimetype="text/event-stream",
                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
