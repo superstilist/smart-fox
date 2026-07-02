@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="AI-powered anime discovery engine. Search by title or describe what you want — AI finds similar anime from AniList, Jikan, and Kitsu databases.">
+    <title>AI Anime Search</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="search-band">
+        <div class="brand-block">
+          <div class="header-row">
+            <div>
+              <p class="eyebrow">AI-powered anime discovery</p>
+              <h1>AI Anime Search</h1>
+            </div>
+            <button class="theme-toggle" id="theme-toggle" type="button" title="Toggle theme">
+              <span class="icon-sun">&#9728;</span>
+              <span class="icon-moon">&#9790;</span>
+              <span class="theme-label">Theme</span>
+            </button>
+          </div>
+        </div>
+        <form class="search-form" method="post" action="/search" data-loading-form>
+          <div class="input-group">
+            <div class="input-row">
+              <div class="input-wrap grow">
+                <label for="query">Anime title</label>
+                <input id="query" name="query" value="{{ query }}" placeholder="Cowboy Bebop" autocomplete="off">
+              </div>
+            </div>
+            <div class="input-wrap">
+              <label for="description">Describe what you want - AI will find it</label>
+              <textarea id="description" name="description" rows="2" placeholder="A space western with jazz music, cool bounty hunters, and episodic adventures...">{{ description if description else "" }}</textarea>
+              <p class="input-hint">Type a description and AI will search based on your words. No title needed.</p>
+            </div>
+            <div class="filter-row">
+              <div class="input-wrap">
+                <label for="content_filter">Content Filter</label>
+                <select id="content_filter" name="content_filter">
+                  <option value="sfw" {{ 'selected' if content_filter == 'sfw' else '' }}>SFW Only</option>
+                  <option value="all" {{ 'selected' if content_filter == 'all' else '' }}>All (SFW + NSFW)</option>
+                  <option value="nsfw" {{ 'selected' if content_filter == 'nsfw' else '' }}>NSFW Only</option>
+                </select>
+              </div>
+              <div class="input-wrap grow">
+                <label for="negative_prompt">Exclude (negative prompt)</label>
+                <input id="negative_prompt" name="negative_prompt" value="{{ negative_prompt if negative_prompt else '' }}" placeholder="harem, ecchi, mecha" autocomplete="off">
+                <p class="input-hint">Comma-separated genres/themes to exclude from results.</p>
+              </div>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="submit">
+              <span class="icon">&#x2315;</span>
+              <span>Search</span>
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {% if error %}
+        <section class="alert">{{ error }}</section>
+      {% endif %}
+
+      {% if profile %}
+        <section class="overview">
+          <div class="poster-panel">
+            {% if profile.media.poster %}
+              <img src="{{ profile.media.poster }}" alt="{{ profile.titles.all[0] if profile.titles.all else query }} poster">
+            {% endif %}
+          </div>
+          <div class="summary-panel">
+            <div class="title-row">
+              <div>
+                <p class="eyebrow">Unified profile</p>
+                <h2>{{ profile.titles.all[0] if profile.titles.all else query }}</h2>
+              </div>
+              <div class="score-grid">
+                {% for source, status in profile.provider_status.items() %}
+                  <div class="source-pill {{ 'ok' if status.ok else 'fail' }}">
+                    <span>{{ source }}</span>
+                    <strong>{{ (status.confidence * 100)|round|int }}%</strong>
+                  </div>
+                {% endfor %}
+              </div>
+            </div>
+            <p class="description">{{ profile.description.summary or "No description found." }}</p>
+            <div class="tag-row">
+              {% for genre in profile.genres[:12] %}
+                <span>{{ genre }}</span>
+              {% endfor %}
+              {% for theme in profile.themes[:12] %}
+                <span class="theme">{{ theme }}</span>
+              {% endfor %}
+            </div>
+          </div>
+        </section>
+
+        <section class="metric-strip">
+          <div><span>Characters</span><strong>{{ profile.characters|length }}</strong></div>
+          <div><span>Recommendations</span><strong>{{ profile.recommendations|length }}</strong></div>
+          <div><span>Studios</span><strong>{{ profile.studios|length }}</strong></div>
+          <div><span>Themes</span><strong>{{ profile.themes|length }}</strong></div>
+        </section>
+
+        <section class="content-grid">
+          <article class="panel info-panel">
+            <h3>Anime Details</h3>
+            <div class="info-grid">
+              {% if profile.release %}
+                {% for source, release in profile.release.items() %}
+                  <div class="info-item">
+                    <span class="info-label">Status ({{ source }})</span>
+                    <span class="info-value">{{ release.status or "Unknown" }}</span>
+                  </div>
+                  {% if release.episodes %}
+                    <div class="info-item">
+                      <span class="info-label">Episodes</span>
+                      <span class="info-value">{{ release.episodes }}</span>
+                    </div>
+                  {% endif %}
+                  {% if release.rating %}
+                    <div class="info-item">
+                      <span class="info-label">Rating</span>
+                      <span class="info-value">{{ release.rating }}</span>
+                    </div>
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+              {% for source, stats in profile.statistics.items() %}
+                {% if stats.score or stats.average_score %}
+                  <div class="info-item">
+                    <span class="info-label">Score ({{ source }})</span>
+                    <span class="info-value">{{ stats.score or stats.average_score or "N/A" }}</span>
+                  </div>
+                {% endif %}
+                {% if stats.popularity %}
+                  <div class="info-item">
+                    <span class="info-label">Popularity</span>
+                    <span class="info-value">#{{ stats.popularity }}</span>
+                  </div>
+                {% endif %}
+              {% endfor %}
+              {% if profile.studios %}
+                <div class="info-item full-width">
+                  <span class="info-label">Studios</span>
+                  <span class="info-value">{{ profile.studios|join(', ') }}</span>
+                </div>
+              {% endif %}
+              {% if profile.titles.romaji %}
+                <div class="info-item full-width">
+                  <span class="info-label">Japanese Title</span>
+                  <span class="info-value">{{ profile.titles.romaji[0] }}</span>
+                </div>
+              {% endif %}
+            </div>
+          </article>
+
+          <article class="panel">
+            <h3>Media</h3>
+            <div class="media-grid">
+              {% if profile.media.banner %}
+                <img src="{{ profile.media.banner }}" alt="Banner">
+              {% endif %}
+              {% if profile.media.trailer %}
+                <a class="media-link" href="{{ profile.media.trailer }}" target="_blank" rel="noreferrer">Trailer</a>
+              {% endif %}
+            </div>
+          </article>
+
+          <article class="panel wide">
+            <h3>Characters</h3>
+            <div class="character-grid">
+              {% for character in profile.characters[:24] %}
+                <div class="character-card">
+                  {% if character.image %}
+                    <img src="{{ character.image }}" alt="{{ character.name }}">
+                  {% endif %}
+                  <div>
+                    <strong>{{ character.name }}</strong>
+                    <span>{{ character.role or "Character" }}</span>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </article>
+
+          <article class="panel wide">
+            <h3>Source Recommendations</h3>
+            <div class="recommendation-list">
+              {% for item in profile.recommendations[:20] %}
+                <a href="{{ item.url or '#' }}" target="_blank" rel="noreferrer">
+                  <strong>{{ item.title }}</strong>
+                  <span>{{ item.source }}</span>
+                </a>
+              {% endfor %}
+            </div>
+          </article>
+
+          <article class="panel wide" id="ai-status-panel" style="display:none;">
+            <h3>AI Search Status</h3>
+            <div class="ai-status-box">
+              <div class="status-header">
+                <div class="status-text" id="ai-status-text">Initializing...</div>
+                <div class="status-count" id="ai-status-count">0 found</div>
+              </div>
+              <div class="status-bar-wrap">
+                <div class="status-bar" id="ai-status-bar" style="width: 0%"></div>
+              </div>
+              <div class="status-detail" id="ai-status-detail"></div>
+            </div>
+          </article>
+
+          <article class="panel wide" id="ai-recommendations">
+            <div class="rec-section-header">
+              <h3 id="ai-rec-title">Recommendations <span id="rec-total-count" class="rec-count"></span></h3>
+              <button class="share-btn" onclick="shareRecommendations()" title="Share">Share</button>
+            </div>
+            <p class="rec-hint">Click any card to see full anime details</p>
+            <div class="ai-rec-grid" id="rec-grid" data-source-title="{{ recommendation.source_title if recommendation else query }}">
+            </div>
+            {% if recommendation %}
+              <details>
+                <summary>Recommendation JSON</summary>
+                <pre>{{ recommendation_json }}</pre>
+              </details>
+            {% endif %}
+          </article>
+
+          <article class="panel wide">
+            <h3>Unified JSON</h3>
+            <pre>{{ profile_json }}</pre>
+          </article>
+        </section>
+      {% else %}
+        <section class="empty-state">
+          <div>
+            <h2>Search by title or describe what you want.</h2>
+            <p>Type a description like "funny school anime with romance" and AI will find matching anime for you. AniList, Jikan, and Kitsu data is merged, then AI generates personalized recommendations. Click any recommendation to see full details.</p>
+          </div>
+        </section>
+      {% endif %}
+    </main>
+
+    <div class="detail-modal" id="detail-modal" style="display:none;">
+      <div class="detail-overlay" onclick="closeDetail()"></div>
+      <div class="detail-panel">
+        <button class="detail-close" onclick="closeDetail()">&times;</button>
+        <div class="detail-loading" id="detail-loading">
+          <div class="loader"></div>
+          <span>Loading anime details...</span>
+        </div>
+        <div class="detail-content" id="detail-content" style="display:none;"></div>
+      </div>
+    </div>
+
+    <div class="loading-overlay" data-loading hidden>
+      <div class="loading-box">
+        <div class="loader big"></div>
+        <span class="loading-title">Searching anime databases...</span>
+        <span class="loading-sub">Finding the best matches for you</span>
+      </div>
+    </div>
+    <div id="profile-data" data-profile="{{ profile|tojson if profile else '' }}" hidden></div>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
