@@ -385,7 +385,9 @@ async def recommend_with_local_ai(
 ) -> dict[str, Any]:
     base_url = settings.effective_ai_base_url.rstrip("/")
     url = f"{base_url}/v1/chat/completions"
-    headers = settings.openrouter_headers
+    headers: dict[str, str] = {}
+    if settings.local_ai_api_key and settings.local_ai_api_key != "local-key":
+        headers["Authorization"] = f"Bearer {settings.local_ai_api_key}"
 
     async with httpx.AsyncClient(timeout=settings.ai_http_timeout) as client:
         model = settings.effective_ai_model
@@ -415,7 +417,9 @@ async def recommend_with_local_ai_streaming(
 ) -> AsyncIterator[str]:
     base_url = settings.effective_ai_base_url.rstrip("/")
     url = f"{base_url}/v1/chat/completions"
-    headers = settings.openrouter_headers
+    headers: dict[str, str] = {}
+    if settings.local_ai_api_key and settings.local_ai_api_key != "local-key":
+        headers["Authorization"] = f"Bearer {settings.local_ai_api_key}"
 
     async with httpx.AsyncClient(timeout=settings.ai_http_timeout) as client:
         model = settings.effective_ai_model
@@ -444,7 +448,9 @@ async def search_by_description(
 ) -> dict[str, Any]:
     base_url = settings.effective_ai_base_url.rstrip("/")
     url = f"{base_url}/v1/chat/completions"
-    headers = settings.openrouter_headers
+    headers: dict[str, str] = {}
+    if settings.local_ai_api_key and settings.local_ai_api_key != "local-key":
+        headers["Authorization"] = f"Bearer {settings.local_ai_api_key}"
 
     async with httpx.AsyncClient(timeout=settings.ai_http_timeout) as client:
         model = settings.effective_ai_model

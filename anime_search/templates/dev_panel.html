@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dev Panel - Fox AI</title>
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <div style="padding:24px;max-width:1200px;margin:0 auto">
+      <h2 style="margin-bottom:16px">Developer Panel</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px">
+        <div class="detail-section" style="background:var(--surface);padding:16px;border-radius:8px;border:1px solid var(--glass-border)">
+          <h4>System Info</h4>
+          <p>Memory: <span id="dev-memory">--</span></p>
+          <p>Platform: <span id="dev-platform">--</span></p>
+          <p>Agent Pipeline: Multi-Agent (Explorer + Advocate + Reviewer + Ranking + Merger)</p>
+        </div>
+        <div class="detail-section" style="background:var(--surface);padding:16px;border-radius:8px;border:1px solid var(--glass-border)">
+          <h4>Cache Stats</h4>
+          <p>Status: Active</p>
+          <p>Type: Two-tier (Memory + SQLite)</p>
+          <p>TTL: 86400s (24h)</p>
+        </div>
+        <div class="detail-section" style="background:var(--surface);padding:16px;border-radius:8px;border:1px solid var(--glass-border)">
+          <h4>API Endpoints</h4>
+          <p>GET /api/health</p>
+          <p>POST /api/ai/start</p>
+          <p>GET /api/ai/status/:id</p>
+          <p>GET /api/ai/stream/:id</p>
+          <p>GET /api/anime/detail?title=</p>
+          <p>POST /api/recommend/posters</p>
+        </div>
+      </div>
+    </div>
+    <script>
+      if (navigator.deviceMemory) document.getElementById('dev-memory').textContent = navigator.deviceMemory + ' GB';
+      if (navigator.platform) document.getElementById('dev-platform').textContent = navigator.platform;
+    </script>
+  </body>
+</html>
