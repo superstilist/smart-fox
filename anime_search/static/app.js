@@ -29,6 +29,7 @@ const loading = document.querySelector("[data-loading]");
 let currentTaskId = null;
 let currentEventSource = null;
 let loadingTimeout = null;
+let _pollGen = 0;
 
 function showLoading(message) {
   if (!loading) return;
@@ -68,10 +69,11 @@ function buildRecCard(item) {
   const escapedTitle = (item.title || "").replace(/'/g, "\\'").replace(/"/g, "&quot;");
   const matchReason = item.match_reason ? `<div class="rec-match-reason">${escapeHtml(item.match_reason)}</div>` : "";
   const weightedScore = item.weighted_score ? `<div class="rec-weighted-score">Weighted: ${item.weighted_score}</div>` : "";
+  const posterSrc = item.poster || "";
   return `
-    <div class="ai-rec-card" data-title="${item.title || ""}" data-rank="${item.rank || 0}" onclick="showDetail('${escapedTitle}')">
+    <div class="ai-rec-card" data-title="${item.title || ""}" data-rank="${item.rank || 0}" data-poster="${posterSrc}" onclick="showDetail('${escapedTitle}')">
       <div class="rec-poster-wrap">
-        <img class="rec-poster" src="" alt="${item.title || ""}" loading="lazy">
+        <img class="rec-poster" src="${posterSrc}" alt="${item.title || ""}" loading="lazy" onerror="this.removeAttribute('src')">
         <div class="rec-poster-placeholder"><span>#${item.rank || "?"}</span></div>
         <div class="rec-rating-badge">${item.rating || "~"}</div>
       </div>
@@ -102,60 +104,93 @@ function buildRecCard(item) {
         </div>
         <div class="rec-actions">
           ${url}
-          <button class="rec-share-btn" onclick="event.stopPropagation(); shareSingleRec('${escapedTitle}')" title="Share">Share</button>
+          <button class="text-btn" style="height:32px;padding:0 10px;font-size:0.76rem;" onclick="event.stopPropagation(); shareSingleRec('${escapedTitle}')" title="Share">Share</button>
         </div>
       </div>
     </div>`;
 }
 
 function clearAll() {
+  _pollGen++;
   if (currentEventSource) {
     currentEventSource.close();
     currentEventSource = null;
   }
   currentTaskId = null;
 
-  const main = document.querySelector(".shell");
+  const main = document.querySelector(".md-container");
   if (main) {
-    main.querySelectorAll("section, article").forEach(el => {
-      if (!el.closest(".search-band") && !el.closest(".detail-modal")) {
+    main.querySelectorAll("section, .profile-layout, article, .md-dialog-scrim").forEach(el => {
+      if (!el.closest(".search-section") && !el.closest(".md-dialog-scrim")) {
         el.remove();
       }
     });
   }
 }
 
+function cancelSearch() {
+  if (!currentTaskId) return;
+  fetch("/api/ai/cancel/" + currentTaskId, { method: "POST" })
+    .then(r => r.json())
+    .then(data => {
+      if (data.status === "cancelled") {
+        showToast("Search cancelled");
+        if (currentEventSource) {
+          currentEventSource.close();
+          currentEventSource = null;
+        }
+        updateStatus(100, "Cancelled", "");
+        hideCancelBtn();
+        hideLoading();
+      }
+    })
+    .catch(() => {});
+}
+
+function showCancelBtn() {
+  const btn = document.getElementById("cancel-search-btn");
+  if (btn) btn.style.display = "";
+}
+
+function hideCancelBtn() {
+  const btn = document.getElementById("cancel-search-btn");
+  if (btn) btn.style.display = "none";
+}
+
 function buildResultSection() {
-  const main = document.querySelector(".shell");
+  const main = document.querySelector(".md-container");
   if (!main || document.getElementById("ai-status-panel")) return;
 
   main.insertAdjacentHTML("beforeend", `
-    <section class="content-grid">
-      <article class="panel wide" id="ai-status-panel">
-        <h3>AI Search Status</h3>
-        <div class="ai-status-box">
-          <div class="status-header">
-            <div class="status-text" id="ai-status-text">Initializing...</div>
-            <div class="status-count" id="ai-status-count">0 found</div>
+    <section class="profile-layout" style="margin-top: 24px;">
+      <div class="profile-grid">
+        <div class="profile-main" style="grid-column: 1 / -1;">
+          <div class="md-card md-card-filled wide" id="ai-status-panel">
+            <h3 class="md-typescale-title-large">AI Search Status</h3>
+            <div class="ai-status-box">
+              <div class="status-header">
+                <div class="status-text md-typescale-body-medium" id="ai-status-text">Initializing...</div>
+                <div class="status-count md-typescale-label-large" id="ai-status-count">0 found</div>
+              </div>
+              <div class="md-linear-progress">
+                <div class="md-linear-progress-bar" id="ai-status-bar" style="width: 0%"></div>
+              </div>
+              <div class="status-detail md-typescale-body-small md-color-muted" id="ai-status-detail"></div>
+              <button class="md-btn md-btn-text" id="cancel-search-btn" type="button" style="display:none;">Cancel</button>
+            </div>
           </div>
-          <div class="status-bar-wrap">
-            <div class="status-bar" id="ai-status-bar" style="width: 0%"></div>
+          <div class="md-card md-card-elevated wide" id="ai-recommendations">
+            <div class="rec-header">
+              <h3 class="md-typescale-title-large" id="ai-rec-title">AI Recommendations <span id="rec-total-count" class="rec-count md-color-muted"></span></h3>
+              <button class="md-icon-btn" onclick="shareRecommendations()" title="Share">
+                <span class="material-symbols-rounded">share</span>
+              </button>
+            </div>
+            <p class="md-typescale-body-small md-color-muted rec-hint">Click any card to see full anime details</p>
+            <div class="ai-rec-grid" id="rec-grid"></div>
           </div>
-          <div class="status-detail" id="ai-status-detail"></div>
         </div>
-        <div class="ai-commentary-box" id="ai-commentary-box">
-          <div class="commentary-header">AI Thinking...</div>
-          <div class="commentary-lines" id="commentary-lines"></div>
-        </div>
-      </article>
-      <article class="panel wide" id="ai-recommendations">
-        <div class="rec-section-header">
-          <h3 id="ai-rec-title">Recommendations <span id="rec-total-count" class="rec-count"></span></h3>
-          <button class="share-btn" onclick="shareRecommendations()" title="Share">Share</button>
-        </div>
-        <p class="rec-hint">Click any card to see full anime details</p>
-        <div class="ai-rec-grid" id="rec-grid"></div>
-      </article>
+      </div>
     </section>`);
 }
 
@@ -167,6 +202,7 @@ function startSearch(query, description, contentFilter, negativePrompt) {
   if (recGrid) recGrid.innerHTML = "";
 
   updateStatus(0, "Searching...", "");
+  showCancelBtn();
   showLoading("Searching anime databases...");
 
   fetch("/api/ai/start", {
@@ -212,11 +248,25 @@ function listenToStream(taskId) {
         appendRecommendation(data.latest);
       }
 
-      if (data.status === "done" || data.status === "error") {
+      if (data.status === "done" || data.status === "error" || data.status === "cancelled") {
         es.close();
         currentEventSource = null;
+        hideCancelBtn();
         if (data.status === "done") {
-          loadFullResults(taskId);
+          if (data.recommendation && data.recommendation.top_50 && data.recommendation.top_50.length) {
+            const recGrid = document.getElementById("rec-grid");
+            if (recGrid) {
+              recGrid.innerHTML = "";
+              recGrid.dataset.aiRawText = data.recommendation.ai_raw_text || "";
+              recGrid.dataset.sourceTitle = data.recommendation.source_title || "";
+              data.recommendation.top_50.forEach(item => {
+                recGrid.innerHTML += buildRecCard(item);
+              });
+              fetchPostersForGrid();
+              updateRecCount();
+            }
+          }
+          hideLoading();
         } else {
           hideLoading();
         }
@@ -228,7 +278,7 @@ function listenToStream(taskId) {
   es.onerror = function () {
     es.close();
     currentEventSource = null;
-    setTimeout(() => pollTaskStatus(taskId), 1000);
+    setTimeout(() => pollTaskStatus(taskId, _pollGen), 1000);
   };
 }
 
@@ -246,7 +296,8 @@ function updateCommentary(lines) {
   container.scrollTop = container.scrollHeight;
 }
 
-function pollTaskStatus(taskId) {
+function pollTaskStatus(taskId, gen) {
+  if (gen !== undefined && gen !== _pollGen) return;
   fetch("/api/ai/status/" + taskId)
     .then(r => r.json())
     .then(data => {
@@ -257,10 +308,10 @@ function pollTaskStatus(taskId) {
         if (data.status === "done") loadFullResults(taskId);
         return;
       }
-      setTimeout(() => pollTaskStatus(taskId), 500);
+      setTimeout(() => pollTaskStatus(taskId, gen), 500);
     })
     .catch(() => {
-      setTimeout(() => pollTaskStatus(taskId), 1000);
+      setTimeout(() => pollTaskStatus(taskId, gen), 1000);
     });
 }
 
@@ -272,20 +323,24 @@ function loadFullResults(taskId) {
       const recGrid = document.getElementById("rec-grid");
       if (!recGrid) return;
 
+      let items = [];
       if (data.recommendation) {
-        const items = data.recommendation.top_50 || data.recommendation.top_25 || [];
-        recGrid.innerHTML = "";
+        items = data.recommendation.top_50 || data.recommendation.top_25 || [];
         recGrid.dataset.aiRawText = data.recommendation.ai_raw_text || "";
         recGrid.dataset.sourceTitle = data.recommendation.source_title || "";
+      } else if (data.results && data.results.length) {
+        items = data.results;
+      }
+
+      if (items.length > 0) {
+        recGrid.innerHTML = "";
         items.forEach(item => {
           recGrid.innerHTML += buildRecCard(item);
         });
-      } else if (data.results && data.results.length) {
-        recGrid.innerHTML = "";
-        data.results.forEach(item => {
-          recGrid.innerHTML += buildRecCard(item);
-        });
+      } else if (!recGrid.children.length) {
+        recGrid.innerHTML = '<p class="rec-hint">No recommendations found. Try a different search.</p>';
       }
+
       fetchPostersForGrid();
       updateRecCount();
     })
@@ -324,17 +379,20 @@ function updateRecCount() {
 function fetchPostersForGrid() {
   const cards = document.querySelectorAll("#rec-grid .ai-rec-card[data-title]");
   if (!cards.length) return;
-  const titles = Array.from(cards).map(c => c.dataset.title).filter(Boolean);
+  const needPoster = Array.from(cards).filter(c => !c.dataset.poster);
+  if (!needPoster.length) return;
+  const titles = needPoster.map(c => c.dataset.title).filter(Boolean);
   if (!titles.length) return;
 
+  const contentFilter = document.getElementById("content_filter")?.value || "sfw";
   fetch("/api/recommend/posters", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ titles }),
+    body: JSON.stringify({ titles, content_filter: contentFilter }),
   })
     .then(r => r.ok ? r.json() : {})
     .then(data => {
-      cards.forEach(card => applyPosterData(card, data[card.dataset.title]));
+      needPoster.forEach(card => applyPosterData(card, data[card.dataset.title]));
     })
     .catch(() => {});
 }
@@ -342,10 +400,11 @@ function fetchPostersForGrid() {
 function fetchPosterForCard(card) {
   const title = card.dataset.title;
   if (!title) return;
+  const contentFilter = document.getElementById("content_filter")?.value || "sfw";
   fetch("/api/recommend/posters", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ titles: [title] }),
+    body: JSON.stringify({ titles: [title], content_filter: contentFilter }),
   })
     .then(r => r.ok ? r.json() : {})
     .then(data => applyPosterData(card, data[title]))
@@ -383,7 +442,8 @@ function showDetail(title) {
   loadingEl.style.display = "flex";
   content.style.display = "none";
 
-  fetch("/api/anime/detail?title=" + encodeURIComponent(title))
+  const contentFilter = document.getElementById("content_filter")?.value || "sfw";
+  fetch("/api/anime/detail?title=" + encodeURIComponent(title) + "&content_filter=" + encodeURIComponent(contentFilter))
     .then(r => r.json())
     .then(data => {
       loadingEl.style.display = "none";
@@ -407,47 +467,55 @@ function closeDetail() {
 }
 
 function buildDetailHTML(d) {
-  const genres = (d.genres || []).map(g => `<span>${g}</span>`).join("");
-  const themes = (d.themes || []).map(t => `<span class="theme">${t}</span>`).join("");
+  const genres = (d.genres || []).map(g => `<span class="md-chip md-chip-primary">${g}</span>`).join("");
+  const themes = (d.themes || []).map(t => `<span class="md-chip md-chip-secondary">${t}</span>`).join("");
   const studios = (d.studios || []).join(", ") || "Unknown";
   const producers = (d.producers || []).join(", ") || "Unknown";
 
   return `
-    <div class="detail-header">
-      ${d.poster ? `<img class="detail-poster" src="${d.poster}" alt="${d.title}">` : ""}
-      <div class="detail-info">
-        <h2>${d.title || "Unknown"}</h2>
-        ${d.title_english ? `<p class="detail-alt-title">${d.title_english}</p>` : ""}
-        ${d.title_japanese ? `<p class="detail-alt-title jp">${d.title_japanese}</p>` : ""}
-        <div class="detail-tags">${genres}${themes}</div>
+    <div style="display: flex; gap: 24px; margin-bottom: 24px;">
+      ${d.poster ? `<img src="${d.poster}" alt="${d.title}" style="width: 150px; border-radius: var(--md-shape-md); flex-shrink: 0; object-fit: cover;">` : ""}
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <h2 class="md-typescale-headline-small">${d.title || "Unknown"}</h2>
+        ${d.title_english ? `<p class="md-typescale-body-large md-color-muted">${d.title_english}</p>` : ""}
+        ${d.title_japanese ? `<p class="md-typescale-body-large md-color-muted">${d.title_japanese}</p>` : ""}
+        <div class="chips-container" style="margin-top: 8px;">${genres}${themes}</div>
       </div>
     </div>
-    ${d.synopsis ? `<div class="detail-section"><h4>Synopsis</h4><p>${d.synopsis}</p></div>` : ""}
-    ${d.background ? `<div class="detail-section"><h4>Background</h4><p>${d.background}</p></div>` : ""}
-    <div class="detail-grid">
-      <div class="detail-stat"><span>Score</span><strong>${d.score || "N/A"}</strong></div>
-      <div class="detail-stat"><span>Ranked</span><strong>#${d.rank || "N/A"}</strong></div>
-      <div class="detail-stat"><span>Popularity</span><strong>#${d.popularity || "N/A"}</strong></div>
-      <div class="detail-stat"><span>Episodes</span><strong>${d.episodes || "Unknown"}</strong></div>
-      <div class="detail-stat"><span>Status</span><strong>${d.status || "Unknown"}</strong></div>
-      <div class="detail-stat"><span>Type</span><strong>${d.type || "Unknown"}</strong></div>
-      <div class="detail-stat"><span>Source</span><strong>${d.source || "Unknown"}</strong></div>
-      <div class="detail-stat"><span>Duration</span><strong>${d.duration || "Unknown"}</strong></div>
-      <div class="detail-stat"><span>Rating</span><strong>${d.rating_val || d.rating || "Unknown"}</strong></div>
-      <div class="detail-stat"><span>Scored By</span><strong>${d.scored_by ? d.scored_by.toLocaleString() : "N/A"}</strong></div>
-      <div class="detail-stat"><span>Members</span><strong>${d.members ? d.members.toLocaleString() : "N/A"}</strong></div>
-      <div class="detail-stat"><span>Favorites</span><strong>${d.favorites ? d.favorites.toLocaleString() : "N/A"}</strong></div>
+    
+    ${d.synopsis ? `<div class="details-card md-card md-card-filled" style="margin-bottom: 16px;"><h3 class="md-typescale-title-large">Synopsis</h3><p class="md-typescale-body-medium">${d.synopsis}</p></div>` : ""}
+    ${d.background ? `<div class="details-card md-card md-card-filled" style="margin-bottom: 16px;"><h3 class="md-typescale-title-large">Background</h3><p class="md-typescale-body-medium">${d.background}</p></div>` : ""}
+    
+    <div class="details-card md-card md-card-filled" style="margin-bottom: 16px;">
+      <h3 class="md-typescale-title-large">Information</h3>
+      <div class="info-grid">
+        <div class="info-item"><span class="info-label">Score</span><span class="info-value"><span class="material-symbols-rounded star-icon">star</span>${d.score || "N/A"}</span></div>
+        <div class="info-item"><span class="info-label">Ranked</span><span class="info-value">#${d.rank || "N/A"}</span></div>
+        <div class="info-item"><span class="info-label">Popularity</span><span class="info-value">#${d.popularity || "N/A"}</span></div>
+        <div class="info-item"><span class="info-label">Episodes</span><span class="info-value">${d.episodes || "Unknown"}</span></div>
+        <div class="info-item"><span class="info-label">Status</span><span class="info-value">${d.status || "Unknown"}</span></div>
+        <div class="info-item"><span class="info-label">Type</span><span class="info-value">${d.type || "Unknown"}</span></div>
+        <div class="info-item"><span class="info-label">Source</span><span class="info-value">${d.source || "Unknown"}</span></div>
+        <div class="info-item"><span class="info-label">Duration</span><span class="info-value">${d.duration || "Unknown"}</span></div>
+        <div class="info-item"><span class="info-label">Rating</span><span class="info-value">${d.rating_val || d.rating || "Unknown"}</span></div>
+        <div class="info-item"><span class="info-label">Scored By</span><span class="info-value">${d.scored_by ? d.scored_by.toLocaleString() : "N/A"}</span></div>
+        <div class="info-item"><span class="info-label">Members</span><span class="info-value">${d.members ? d.members.toLocaleString() : "N/A"}</span></div>
+        <div class="info-item"><span class="info-label">Favorites</span><span class="info-value">${d.favorites ? d.favorites.toLocaleString() : "N/A"}</span></div>
+      </div>
     </div>
-    <div class="detail-section">
-      <h4>Studios</h4><p>${studios}</p>
+    
+    <div class="details-card md-card md-card-filled" style="margin-bottom: 16px;">
+      <h3 class="md-typescale-title-large">Production</h3>
+      <div class="info-grid">
+        <div class="info-item"><span class="info-label">Studios</span><span class="info-value">${studios}</span></div>
+        <div class="info-item"><span class="info-label">Producers</span><span class="info-value">${producers}</span></div>
+        ${d.aired ? `<div class="info-item full-width"><span class="info-label">Aired</span><span class="info-value">${d.aired}</span></div>` : ""}
+      </div>
     </div>
-    <div class="detail-section">
-      <h4>Producers</h4><p>${producers}</p>
-    </div>
-    ${d.aired ? `<div class="detail-section"><h4>Aired</h4><p>${d.aired}</p></div>` : ""}
-    <div class="detail-actions">
-      ${d.url ? `<a class="detail-link" href="${d.url}" target="_blank" rel="noreferrer">View on MyAnimeList</a>` : ""}
-      ${d.trailer ? `<a class="detail-link trailer" href="${d.trailer}" target="_blank" rel="noreferrer">Watch Trailer</a>` : ""}
+    
+    <div class="md-dialog-actions" style="padding: 0; justify-content: flex-start; margin-top: 16px;">
+      ${d.url ? `<a class="md-btn md-btn-filled" href="${d.url}" target="_blank" rel="noreferrer">View on MyAnimeList</a>` : ""}
+      ${d.trailer ? `<a class="md-btn md-btn-outlined" href="${d.trailer}" target="_blank" rel="noreferrer"><span class="material-symbols-rounded">play_arrow</span> Trailer</a>` : ""}
     </div>
   `;
 }
@@ -505,3 +573,187 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.key === "Escape") closeDetail();
   });
 });
+
+/* ── Settings ── */
+function openSettings() {
+  const modal = document.getElementById("settings-modal");
+  if (!modal) return;
+  modal.style.display = "flex";
+  loadSettingsForm();
+}
+function closeSettings() {
+  const modal = document.getElementById("settings-modal");
+  if (modal) modal.style.display = "none";
+}
+
+function loadSettingsForm() {
+  fetch("/api/config").then(r => r.json()).then(cfg => {
+    setVal("cfg-local-base-url", cfg.local_ai_base_url);
+    setVal("cfg-local-model", cfg.local_ai_model);
+    setVal("cfg-local-api-key", cfg.has_local_api_key ? "••••••••" : "");
+    setVal("cfg-openrouter-api-key", cfg.has_api_key ? "••••••••" : "");
+    setVal("cfg-openrouter-model", cfg.openrouter_model);
+    setVal("cfg-openrouter-base-url", cfg.ai_base_url);
+    setVal("cfg-openrouter-fallback", cfg.openrouter_fallback_models);
+    setVal("cfg-ai-temperature", cfg.ai_temperature);
+    setVal("cfg-ai-max-tokens", cfg.ai_max_tokens);
+    setVal("cfg-ai-timeout", cfg.ai_timeout_seconds);
+    setVal("cfg-agent-max-iterations", cfg.agent_max_iterations);
+    setVal("cfg-agent-max-tool-calls", cfg.agent_max_tool_calls);
+
+    const provider = cfg.ai_provider || "local";
+    document.querySelectorAll('input[name="ai_provider"]').forEach(r => {
+      r.checked = r.value === provider;
+      r.closest(".provider-card")?.classList.toggle("active", r.checked);
+    });
+    toggleProviderSections(provider);
+  }).catch(() => {});
+}
+
+function setVal(id, val) {
+  const el = document.getElementById(id);
+  if (el && val !== undefined && val !== null) el.value = val;
+}
+
+function toggleProviderSections(provider) {
+  const localSection = document.getElementById("settings-local-section");
+  const orSection = document.getElementById("settings-openrouter-section");
+  const modelStatus = document.getElementById("settings-model-status-section");
+  if (localSection) localSection.style.display = provider === "local" ? "" : "none";
+  if (orSection) orSection.style.display = provider === "openrouter" ? "" : "none";
+  if (modelStatus) modelStatus.style.display = provider === "openrouter" ? "" : "none";
+}
+
+function collectSettings() {
+  const provider = document.querySelector('input[name="ai_provider"]:checked')?.value || "local";
+  return {
+    ai_provider: provider,
+    local_ai_base_url: getVal("cfg-local-base-url"),
+    local_ai_model: getVal("cfg-local-model"),
+    local_ai_api_key: getVal("cfg-local-api-key"),
+    ai_api_key: getVal("cfg-openrouter-api-key"),
+    openrouter_model: getVal("cfg-openrouter-model"),
+    ai_base_url: getVal("cfg-openrouter-base-url"),
+    openrouter_fallback_models: getVal("cfg-openrouter-fallback"),
+    ai_temperature: parseFloat(getVal("cfg-ai-temperature")) || 0.15,
+    ai_max_tokens: parseInt(getVal("cfg-ai-max-tokens")) || 4096,
+    ai_timeout_seconds: parseFloat(getVal("cfg-ai-timeout")) || 120,
+    agent_max_iterations: parseInt(getVal("cfg-agent-max-iterations")) || 10,
+    agent_max_tool_calls: parseInt(getVal("cfg-agent-max-tool-calls")) || 15,
+  };
+}
+
+function getVal(id) {
+  return document.getElementById(id)?.value || "";
+}
+
+function saveSettings() {
+  const status = document.getElementById("settings-status");
+  const payload = collectSettings();
+  fetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).then(r => r.json()).then(data => {
+    if (data.error) {
+      if (status) { status.textContent = "Error: " + data.error; status.className = "settings-status error"; }
+    } else {
+      if (status) { status.textContent = "Settings saved!"; status.className = "settings-status ok"; }
+      showToast("Settings saved");
+    }
+  }).catch(err => {
+    if (status) { status.textContent = "Save failed: " + err; status.className = "settings-status error"; }
+  });
+}
+
+function testConnection() {
+  const status = document.getElementById("settings-status");
+  if (status) { status.textContent = "Testing connection..."; status.className = "settings-status"; }
+  fetch("/api/test-connection", { method: "POST" }).then(r => r.json()).then(data => {
+    if (data.status === 200) {
+      if (status) { status.textContent = "Connection OK (200)"; status.className = "settings-status ok"; }
+    } else {
+      if (status) { status.textContent = "Failed (" + (data.status || "error") + "): " + (data.error || data.body || ""); status.className = "settings-status error"; }
+    }
+  }).catch(err => {
+    if (status) { status.textContent = "Test failed: " + err; status.className = "settings-status error"; }
+  });
+}
+
+function resetDefaults() {
+  if (!confirm("Reset all settings to defaults?")) return;
+  fetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  }).then(r => r.json()).then(() => {
+    loadSettingsForm();
+    showToast("Settings reset to defaults");
+  });
+}
+
+function refreshModelStatus() {
+  const grid = document.getElementById("model-status-grid");
+  if (!grid) return;
+  grid.innerHTML = '<div class="model-status-loading">Checking models...</div>';
+  fetch("/api/models/status").then(r => r.json()).then(data => {
+    if (data.error) {
+      grid.innerHTML = `<div class="model-status-error">${escapeHtml(data.error)}</div>`;
+      return;
+    }
+    const models = data.models || [];
+    if (!models.length) {
+      grid.innerHTML = '<div class="model-status-loading">No models configured</div>';
+      return;
+    }
+    grid.innerHTML = models.map(m => {
+      const statusClass = m.status === "ok" ? "online" : m.status === "rate_limited" ? "limited" : "offline";
+      const statusLabel = m.status === "ok" ? "Available" : m.status === "rate_limited" ? "Rate Limited" : "Error";
+      const latency = m.latency_ms ? `${m.latency_ms}ms` : "";
+      const badge = m.is_primary ? '<span class="model-badge-primary">Primary</span>' : "";
+      const errorInfo = m.error ? `<span class="model-error-detail" title="${escapeHtml(m.error)}">!</span>` : "";
+      return `<div class="model-status-card ${statusClass}">
+        <div class="model-status-dot"></div>
+        <div class="model-status-info">
+          <div class="model-status-name">${escapeHtml(m.model)} ${badge}</div>
+          <div class="model-status-meta">${statusLabel} ${latency} ${errorInfo}</div>
+        </div>
+      </div>`;
+    }).join("");
+  }).catch(err => {
+    grid.innerHTML = `<div class="model-status-error">Failed to check models: ${escapeHtml(String(err))}</div>`;
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const gear = document.getElementById("settings-toggle");
+  if (gear) gear.addEventListener("click", openSettings);
+
+  document.querySelectorAll('input[name="ai_provider"]').forEach(radio => {
+    radio.addEventListener("change", () => {
+      document.querySelectorAll(".provider-card").forEach(c => c.classList.remove("active"));
+      radio.closest(".provider-card")?.classList.add("active");
+      toggleProviderSections(radio.value);
+    });
+  });
+
+  const saveBtn = document.getElementById("settings-save");
+  if (saveBtn) saveBtn.addEventListener("click", saveSettings);
+
+  const testBtn = document.getElementById("settings-test");
+  if (testBtn) testBtn.addEventListener("click", testConnection);
+
+  const resetBtn = document.getElementById("settings-reset");
+  if (resetBtn) resetBtn.addEventListener("click", resetDefaults);
+
+  const refreshBtn = document.getElementById("settings-refresh-models");
+  if (refreshBtn) refreshBtn.addEventListener("click", refreshModelStatus);
+});
+
+/* ── Cancel Button ── */
+document.addEventListener("DOMContentLoaded", () => {
+  const cancelBtn = document.getElementById("cancel-search-btn");
+  if (cancelBtn) cancelBtn.addEventListener("click", cancelSearch);
+});
+
+

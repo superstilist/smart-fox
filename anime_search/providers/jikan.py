@@ -14,6 +14,7 @@ log = logging.getLogger(__name__)
 class JikanProvider(AnimeProvider):
     name = "jikan"
     confidence = 0.98
+    priority = 10
 
     async def _jikan_get(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         last_exc: Exception | None = None

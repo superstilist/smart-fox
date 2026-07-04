@@ -101,6 +101,7 @@ def normalize_query(raw_query: str) -> str:
 class AniListProvider(AnimeProvider):
     name = "anilist"
     confidence = 1.0
+    priority = 20
 
     async def fetch(self, query: str, content_filter: str = "sfw") -> dict[str, Any]:
         normalized = normalize_query(query)

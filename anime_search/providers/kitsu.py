@@ -13,6 +13,7 @@ log = logging.getLogger(__name__)
 class KitsuProvider(AnimeProvider):
     name = "kitsu"
     confidence = 0.95
+    priority = 30
 
     async def fetch(self, query: str, content_filter: str = "sfw") -> dict[str, Any]:
         headers = {"Accept": "application/vnd.api+json"}

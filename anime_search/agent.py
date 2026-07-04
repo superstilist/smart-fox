@@ -167,13 +167,23 @@ You MUST analyze these web results FIRST before doing anything else.
 
 ---
 
+## DEEP REASONING & TOOL USAGE
+
+You MUST use your OWN BRAIN to perform deep reasoning. Do not jump to conclusions. Think step-by-step about what the user is asking for.
+Analyze the themes, tone, and character dynamics requested.
+If your internal memory is fuzzy, or if you need detailed reviews, ratings, or synopsis data, you MUST aggressively use your external tools!
+Specifically, use `web_search_anime(query)` to pull info from DuckDuckGo, and use `search_anime_multi_api(query)` or `get_anime_details(title)` to pull structured API data (AniList, Jikan, Kitsu).
+Never guess details if you can fetch them accurately.
+
+---
+
 ## AFTER ANALYZING WEB RESULTS
 
 You are FREE to use ANY tools you need:
 
-- web_search_anime(query) — Search DuckDuckGo again
-- web_search_wikipedia(query) — Search Wikipedia again
-- web_search_fandom(query) — Search Fandom again
+- web_search_anime(query) — Search DuckDuckGo (USE THIS ACTIVELY for detailed info)
+- web_search_wikipedia(query) — Search Wikipedia
+- web_search_fandom(query) — Search Fandom
 - search_anime_by_title(title) — Search MAL
 - search_anime_by_genre(genre) — Search by genre
 - search_anime_multi_api(query) — Search all APIs
@@ -182,7 +192,7 @@ You are FREE to use ANY tools you need:
 - semantic_search(query) — Semantic search
 - hybrid_recommend(query) — Hybrid recommendation
 
-Use whatever tools give you the BEST results.
+Use whatever tools give you the BEST results. DO NOT rely solely on the PRE-SEARCHED results if they are insufficient.
 
 ---
 
@@ -298,10 +308,72 @@ Return ONLY the JSON response. No other text.
 
 
 class AnimeAgent:
+    _openrouter_cooldown_until: float = 0.0  # class-level: when ALL models exhausted, wait
+
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings()
         self.tool_calls_log: list[dict[str, Any]] = []
         self.kb: list[dict[str, Any]] = _load_kb()
+        self._llm_url = f"{self.settings.effective_ai_base_url.rstrip('/')}/v1/chat/completions"
+        self._llm_headers = self.settings.llm_headers
+        self._current_model = self.settings.effective_ai_model
+        self._fallback_models = [
+            m.strip() for m in self.settings.openrouter_fallback_models.split(",") if m.strip()
+        ]
+
+    @classmethod
+    def _check_cooldown(cls) -> float:
+        remaining = cls._openrouter_cooldown_until - time.time()
+        return max(0.0, remaining)
+
+    @classmethod
+    def _set_cooldown(cls, seconds: float = 30.0) -> None:
+        cls._openrouter_cooldown_until = time.time() + seconds
+
+    async def _llm_call(self, payload: dict[str, Any], on_commentary: Any = None) -> dict[str, Any] | None:
+        cooldown = self._check_cooldown()
+        if cooldown > 0:
+            log.info("OpenRouter global cooldown: %.0fs remaining", cooldown)
+            if on_commentary:
+                await on_commentary(f"## OpenRouter cooldown {cooldown:.0f}s...")
+            await asyncio.sleep(cooldown)
+
+        models_to_try = [self._current_model] + [
+            m for m in self._fallback_models if m != self._current_model
+        ]
+        all_429 = True
+        async with httpx.AsyncClient(timeout=self.settings.ai_http_timeout) as client:
+            for model in models_to_try:
+                payload["model"] = model
+                try:
+                    response = await client.post(self._llm_url, json=payload, headers=self._llm_headers)
+                    if response.status_code == 429:
+                        wait = min(float(response.headers.get("Retry-After", "3")), 5)
+                        log.info("Rate limited on %s, waiting %.0fs", model, wait)
+                        if on_commentary:
+                            await on_commentary(f"## Rate limited on {model}, waiting {wait:.0f}s...")
+                        await asyncio.sleep(wait)
+                        continue
+                    response.raise_for_status()
+                    self._current_model = model
+                    all_429 = False
+                    return response.json()
+                except httpx.HTTPStatusError:
+                    raise
+                except Exception as exc:
+                    log.warning("LLM call failed on %s: %s", model, exc)
+                    if on_commentary:
+                        await on_commentary(f"## {model} failed: {exc}")
+                    continue
+                finally:
+                    if on_commentary and model != models_to_try[-1]:
+                        pass
+        if all_429:
+            self._set_cooldown(25.0)
+            log.warning("All OpenRouter models rate-limited, global cooldown 25s")
+            if on_commentary:
+                await on_commentary("## All models rate limited, cooling down 25s...")
+        return None
 
     async def research(
         self,
@@ -339,11 +411,8 @@ class AnimeAgent:
         if on_commentary:
             await on_commentary(f"## Anime index loaded: {index_count} entries in DB")
 
-        base_url = self.settings.effective_ai_base_url.rstrip("/")
-        url = f"{base_url}/v1/chat/completions"
-        headers: dict[str, str] = {}
-        if self.settings.local_ai_api_key and self.settings.local_ai_api_key != "local-key":
-            headers["Authorization"] = f"Bearer {self.settings.local_ai_api_key}"
+        url = self._llm_url
+        headers = self._llm_headers
 
         user_message = self._build_user_message(query, user_description, profile, web_results)
         messages: list[dict[str, Any]] = [
@@ -362,7 +431,7 @@ class AnimeAgent:
                 await on_commentary(f"## AI thinking... (step {iteration + 1})")
 
             payload = {
-                "model": self.settings.effective_ai_model,
+                "model": self._current_model,
                 "messages": messages,
                 "tools": TOOL_DEFINITIONS,
                 "tool_choice": "auto",
@@ -371,10 +440,12 @@ class AnimeAgent:
             }
 
             try:
-                async with httpx.AsyncClient(timeout=self.settings.ai_http_timeout) as client:
-                    response = await client.post(url, json=payload, headers=headers)
-                    response.raise_for_status()
-                    response_data = response.json()
+                response_data = await self._llm_call(payload, on_commentary)
+                if response_data is None:
+                    log.warning("Agent LLM call failed at iteration %d: all models exhausted", iteration)
+                    if on_commentary:
+                        await on_commentary("## LLM call failed: all models rate limited")
+                    break
             except Exception as exc:
                 log.warning("Agent LLM call failed at iteration %d: %s", iteration, exc)
                 if on_commentary:
@@ -463,7 +534,164 @@ class AnimeAgent:
 
                 await asyncio.sleep(self.settings.agent_tool_delay)
 
-        return self._parse_final_response(accumulated_text, accumulated_text)
+        # If we already have tool results and LLM is completely dead,
+        # skip the extra LLM call and build result from tool data directly
+        if self.tool_calls_log:
+            if on_commentary:
+                await on_commentary("## All models rate-limited. Using tool results directly.")
+            return self._build_top50_from_tool_calls(accumulated_text, self.tool_calls_log)
+
+        return await self._force_final_response(messages, accumulated_text, on_commentary)
+
+    async def _force_final_response(
+        self,
+        messages: list[dict[str, Any]],
+        accumulated_text: str,
+        on_commentary: Any = None,
+    ) -> dict[str, Any]:
+        messages.append({
+            "role": "user",
+            "content": (
+                "STOP using tools. You have used enough tools and gathered enough data.\n"
+                "Now produce your FINAL answer as a single JSON object with a top_50 array.\n"
+                "Return ONLY the JSON. No tool calls. No other text.\n\n"
+                "Example format:\n"
+                '```json\n{"engine":"agent","source_title":"query","top_50":[{"rank":1,"title":"Anime Title","score":8.5,"genres":["Action"],"synopsis":"Short synopsis","match_reason":"Why recommended","rating":85,"similarity_percentage":84.9,"story_similarity":80,"character_similarity":75,"world_similarity":70,"theme_similarity":85,"power_system_similarity":60,"emotional_similarity":80,"art_style_similarity":70,"music_similarity":65,"pacing_similarity":72,"tone_similarity":78,"audience_similarity":82,"genre_blend_similarity":88,"confidence_score":90,"connection_type":"genre"}]}\n```'
+            ),
+        })
+
+        payload = {
+            "model": self._current_model,
+            "messages": messages,
+            "tools": [],
+            "tool_choice": "none",
+            "temperature": self.settings.ai_temperature,
+            "max_tokens": self.settings.ai_max_tokens,
+        }
+
+        try:
+            response_data = await self._llm_call(payload, on_commentary)
+            if response_data:
+                content = response_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                accumulated_text += "\n" + content
+                if on_commentary:
+                    await on_commentary("## Producing final result...")
+        except Exception as exc:
+            log.warning("Final LLM call failed: %s", exc)
+
+        result = self._parse_final_response(accumulated_text, accumulated_text)
+        if not result.get("top_50"):
+            result = self._build_top50_from_tool_calls(accumulated_text)
+        return result
+
+    _NON_ANIME_TYPES = {"special", "music", "pv", "cm"}
+    _JUNK_TITLE_PATTERNS = re.compile(
+        r"(?:best\s*\d+|top\s*\d+|opening|ending|pv|cm|preview|bonus|extra|oad|special\s*episode)",
+        re.IGNORECASE,
+    )
+
+    def _is_valid_anime(self, entry: dict[str, Any]) -> bool:
+        anime_type = (entry.get("type") or "").lower()
+        if anime_type in self._NON_ANIME_TYPES:
+            return False
+        title = entry.get("title") or ""
+        if self._JUNK_TITLE_PATTERNS.search(title):
+            return False
+        episodes = entry.get("episodes")
+        if anime_type == "special" and isinstance(episodes, int) and episodes <= 2:
+            return False
+        return True
+
+    def _make_match_reason(self, entry: dict[str, Any], tool_name: str) -> str:
+        genres = entry.get("genres") or []
+        score = entry.get("score")
+        episodes = entry.get("episodes")
+        anime_type = entry.get("type") or "TV"
+        parts = []
+        if genres:
+            parts.append(f"genres: {', '.join(genres[:3])}")
+        if score:
+            parts.append(f"MAL score {score}")
+        if episodes:
+            parts.append(f"{episodes} episodes")
+        if anime_type and anime_type != "TV":
+            parts.append(f"type: {anime_type}")
+        tool_label = tool_name.replace("_", " ").replace("search anime ", "").replace("search ", "")
+        if parts:
+            return f"Found via {tool_label} — {', '.join(parts)}"
+        return f"Found via {tool_label}"
+
+    def _build_top50_from_tool_calls(self, accumulated_text: str, override_tool_calls: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        titles_seen: set[str] = set()
+        items: list[dict[str, Any]] = []
+        tool_logs = override_tool_calls if override_tool_calls is not None else self.tool_calls_log
+        for tc_log in tool_logs:
+            raw = tc_log.get("result", {})
+            entries = self._extract_entries_from_result(raw)
+            tool_name = tc_log.get("tool", "agent")
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                if not self._is_valid_anime(entry):
+                    continue
+                title = entry.get("title") or entry.get("title_english") or ""
+                if not title or title.lower() in titles_seen:
+                    continue
+                titles_seen.add(title.lower())
+                score = entry.get("score") or 0
+                base_sim = max(50, min(95, round(score * 10)) if score else 70)
+                items.append({
+                    "rank": len(items) + 1,
+                    "title": title,
+                    "score": score,
+                    "genres": entry.get("genres", []),
+                    "synopsis": (entry.get("synopsis") or "")[:300],
+                    "episodes": entry.get("episodes"),
+                    "type": entry.get("type"),
+                    "status": entry.get("status"),
+                    "poster": entry.get("poster"),
+                    "url": entry.get("url"),
+                    "match_reason": self._make_match_reason(entry, tool_name),
+                    "rating": min(100, base_sim),
+                    "similarity_percentage": float(base_sim),
+                    "story_similarity": base_sim,
+                    "character_similarity": base_sim,
+                    "world_similarity": base_sim,
+                    "theme_similarity": base_sim,
+                    "power_system_similarity": base_sim,
+                    "emotional_similarity": base_sim,
+                    "art_style_similarity": base_sim,
+                    "music_similarity": base_sim,
+                    "pacing_similarity": base_sim,
+                    "tone_similarity": base_sim,
+                    "audience_similarity": base_sim,
+                    "genre_blend_similarity": base_sim,
+                    "confidence_score": min(100, base_sim + 5),
+                    "connection_type": "tool_result",
+                })
+        return {
+            "engine": "agent",
+            "source_title": "Agent research",
+            "top_50": items[:50],
+            "tool_calls": self.tool_calls_log,
+            "raw_text": accumulated_text,
+        }
+
+    def _extract_entries_from_result(self, raw: Any) -> list[dict[str, Any]]:
+        if isinstance(raw, list):
+            return [e for e in raw if isinstance(e, dict)]
+        if not isinstance(raw, dict):
+            return []
+        for key in ("result", "results", "data", "entries"):
+            val = raw.get(key)
+            if isinstance(val, list):
+                return [e for e in val if isinstance(e, dict)]
+            if isinstance(val, dict):
+                for inner_key in ("result", "results", "data"):
+                    inner = val.get(inner_key)
+                    if isinstance(inner, list):
+                        return [e for e in inner if isinstance(e, dict)]
+        return []
 
     async def execute_kb_tool(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name == "search_knowledge_base":

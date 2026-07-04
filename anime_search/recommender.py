@@ -407,6 +407,23 @@ def evidence_for(
     return evidence[:4]
 
 
+_NON_ANIME_TYPES = {"special", "music", "pv", "cm"}
+_JUNK_TITLE_RE = re.compile(
+    r"(?:best\s*\d+|top\s*\d+|opening|ending|pv|cm|preview|bonus|extra|oad)",
+    re.IGNORECASE,
+)
+
+
+def _is_valid_anime_item(item: dict[str, Any]) -> bool:
+    anime_type = (item.get("type") or "").lower()
+    if anime_type in _NON_ANIME_TYPES:
+        return False
+    title = item.get("title") or ""
+    if _JUNK_TITLE_RE.search(title):
+        return False
+    return True
+
+
 def normalize_ai_recommendations(payload: dict[str, Any], profile: UnifiedAnimeProfile) -> dict[str, Any]:
     top = payload.get("top_50") or payload.get("top_25") or payload.get("top_20")
     if not isinstance(top, list):
@@ -422,6 +439,8 @@ def normalize_ai_recommendations(payload: dict[str, Any], profile: UnifiedAnimeP
     seen_titles: set[str] = set()
     for index, item in enumerate(top[:50], start=1):
         if not isinstance(item, dict) or not item.get("title"):
+            continue
+        if not _is_valid_anime_item(item):
             continue
         title = normalize_text(item.get("title"))
         if title.lower() in seen_titles:
@@ -455,6 +474,7 @@ def normalize_ai_recommendations(payload: dict[str, Any], profile: UnifiedAnimeP
                 "rank": int(item.get("rank") or index),
                 "title": title,
                 "url": item.get("url"),
+                "poster": item.get("poster"),
                 "synopsis": normalize_text(item.get("synopsis")),
                 "match_reason": match_reason,
                 "rating": int(max(0, min(100, rating))),

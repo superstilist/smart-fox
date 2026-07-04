@@ -17,12 +17,14 @@ from anime_search.ai import (
     parse_streaming_chunks,
     agent_recommend,
 )
-from anime_search.cache import SQLiteJsonCache
+from anime_search.cache import SQLiteJsonCache, SEARCH_TTL, RECOMMENDATION_TTL
 from anime_search.config import Settings
 from anime_search.image_cache import cache_profile_images
 from anime_search.merge import merge_profiles
 from anime_search.models import SourceResult, UnifiedAnimeProfile, SearchType
+from anime_search.normalizer import normalize_query, normalize_for_api
 from anime_search.providers import AniListProvider, JikanProvider, KitsuProvider
+from anime_search.ratelimit import RateLimiter
 from anime_search.recommender import fallback_recommendations, normalize_ai_recommendations
 
 log = logging.getLogger(__name__)
@@ -63,6 +65,20 @@ def _update_task(task_id: str, **kwargs: Any) -> None:
             _tasks[task_id].update(kwargs)
 
 
+def cancel_task(task_id: str) -> bool:
+    with _tasks_lock:
+        task = _tasks.get(task_id)
+        if task is None:
+            return False
+        if task.get("status") in ("done", "error", "cancelled"):
+            return False
+        task["cancelled"] = True
+        task["status"] = "cancelled"
+        task["progress"] = 100
+        task["message"] = "Cancelled by user"
+    return True
+
+
 def cleanup_old_tasks() -> None:
     now = time.time()
     with _tasks_lock:
@@ -75,6 +91,31 @@ class AnimeSearchEngine:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings()
         self.cache = SQLiteJsonCache(self.settings.cache_path, self.settings.cache_ttl_seconds)
+        self._limiter = RateLimiter()
+        self._search_cache_ttl = SEARCH_TTL
+        self._recommendation_cache_ttl = RECOMMENDATION_TTL
+
+    def _build_status(self, results: list[SourceResult] | None = None, cache_hit: bool = False) -> dict[str, Any]:
+        provider_status: dict[str, Any] = {}
+        if results:
+            for r in results:
+                provider_status[r.source] = {
+                    "ok": r.ok,
+                    "error": r.error,
+                    "latency_ms": round(r.response_time_ms, 1),
+                }
+        else:
+            provider_status = {"_note": "no providers called yet"}
+
+        rate_limit_status = self._limiter.get_status()
+        cache_stats = self.cache.get_stats()
+
+        return {
+            "cache": "hit" if cache_hit else "miss",
+            "cache_l1_hit_rate": cache_stats.get("l1", {}).get("hit_rate", 0),
+            "providers": provider_status,
+            "rate_limits": rate_limit_status,
+        }
 
     async def search(
         self,
@@ -83,8 +124,9 @@ class AnimeSearchEngine:
         content_filter: str = "sfw",
         negative_prompt: str = "",
     ) -> UnifiedAnimeProfile:
+        nq = normalize_query(query, description)
         use_cache = not description
-        cache_key = query.strip().lower()
+        cache_key = nq.clean_query.strip().lower() or query.strip().lower()
 
         if use_cache:
             cached = self.cache.get("merged", cache_key)
@@ -92,23 +134,32 @@ class AnimeSearchEngine:
                 log.debug("Cache hit for search: %s", cache_key)
                 return UnifiedAnimeProfile.model_validate(cached)
 
-        async with httpx.AsyncClient(timeout=self.settings.http_timeout) as client:
-            providers = [
-                AniListProvider(client, self.cache, self.settings),
-                JikanProvider(client, self.cache, self.settings),
-                KitsuProvider(client, self.cache, self.settings),
-            ]
+        providers = [
+            JikanProvider(None, self.cache, self.settings),
+            AniListProvider(None, self.cache, self.settings),
+            KitsuProvider(None, self.cache, self.settings),
+        ]
+        providers.sort(key=lambda p: p.priority)
 
-            results: list[SourceResult] = []
+        results: list[SourceResult] = []
+
+        async with httpx.AsyncClient(timeout=self.settings.http_timeout) as client:
             for provider in providers:
+                provider.client = client
+                search_query = normalize_for_api(cache_key, provider.name)
                 result = await provider.search(
-                    cache_key,
+                    search_query,
                     content_filter=content_filter,
                     negative_prompt=negative_prompt,
                 )
                 results.append(result)
                 status = "OK" if result.ok else f"FAILED ({result.error})"
                 log.info("Provider %s: %s", provider.name, status)
+
+                ok_count = sum(1 for r in results if r.ok)
+                if ok_count >= 2:
+                    log.info("Got %d successful results, skipping remaining providers", ok_count)
+                    break
 
             successful_count = sum(1 for r in results if r.ok)
             if successful_count == 0:
@@ -117,9 +168,11 @@ class AnimeSearchEngine:
 
             log.info("Merging %d/%d successful provider results for '%s'", successful_count, len(results), cache_key)
             profile = merge_profiles(cache_key, results)
+
             if description:
                 existing_desc = profile.description.get("summary", "") or ""
                 profile.description["summary"] = f"{existing_desc}\n\nUser context: {description}" if existing_desc else description
+
             try:
                 await cache_profile_images(client, self.cache, profile, self.settings.cache_path)
             except Exception:
@@ -136,6 +189,16 @@ class AnimeSearchEngine:
         content_filter: str = "sfw",
         negative_prompt: str = "",
     ) -> dict:
+        nq = normalize_query(query, user_description)
+        cache_key = nq.clean_query.strip().lower() or query.strip().lower()
+        rec_cache_key = f"rec:{cache_key}:{content_filter}:{negative_prompt}"
+
+        cached = self.cache.get("recommendation", rec_cache_key)
+        if cached is not None:
+            log.debug("Recommendation cache hit for: %s", cache_key)
+            cached["_cache_status"] = "hit"
+            return cached
+
         profile = await self.search(query, user_description, content_filter, negative_prompt)
         try:
             ai_result = await agent_recommend(profile, self.settings, user_description)
@@ -151,7 +214,10 @@ class AnimeSearchEngine:
             log.warning("Agent recommendation failed: %s", exc)
             recommendation = fallback_recommendations(profile)
             recommendation["ai_error"] = str(exc)
+
         recommendation["source_title"] = profile.get_primary_title()
+        recommendation["_cache_status"] = "miss"
+        self.cache.set("recommendation", rec_cache_key, recommendation, ttl_seconds=self._recommendation_cache_ttl)
         return recommendation
 
     def start_background_recommend(
@@ -176,6 +242,7 @@ class AnimeSearchEngine:
             "profile": None,
             "recommendation": None,
             "tool_calls": [],
+            "system_status": {},
         })
 
         def _run() -> None:
@@ -204,20 +271,88 @@ class AnimeSearchEngine:
     ) -> None:
         log.info("Background task %s started for query: %s (description: %s)", task_id, query, bool(user_description))
         _update_task(task_id, status="searching", progress=10, message="Searching anime databases...")
+
+        if _get_task(task_id) and _get_task(task_id).get("cancelled"):
+            log.info("Background task %s cancelled during search", task_id)
+            return
+
+        search_status: dict[str, Any] = {}
         try:
-            profile = await self.search(query, user_description, content_filter, negative_prompt)
+            nq = normalize_query(query, user_description)
+            cache_key = nq.clean_query.strip().lower() or query.strip().lower()
+
+            cache_hit = False
+            cached = self.cache.get("merged", cache_key)
+            if cached is not None:
+                profile = UnifiedAnimeProfile.model_validate(cached)
+                cache_hit = True
+                search_status = self._build_status(cache_hit=True)
+            else:
+                providers = [
+                    JikanProvider(None, self.cache, self.settings),
+                    AniListProvider(None, self.cache, self.settings),
+                    KitsuProvider(None, self.cache, self.settings),
+                ]
+                providers.sort(key=lambda p: p.priority)
+
+                results: list[SourceResult] = []
+
+                async with httpx.AsyncClient(timeout=self.settings.http_timeout) as client:
+                    for provider in providers:
+                        provider.client = client
+                        search_query = normalize_for_api(cache_key, provider.name)
+                        result = await provider.search(
+                            search_query,
+                            content_filter=content_filter,
+                            negative_prompt=negative_prompt,
+                        )
+                        results.append(result)
+                        status = "OK" if result.ok else f"FAILED ({result.error})"
+                        log.info("Background task %s - Provider %s: %s", task_id, provider.name, status)
+
+                        ok_count = sum(1 for r in results if r.ok)
+                        if ok_count >= 2:
+                            log.info("Background task %s: got %d successful results, skipping remaining", task_id, ok_count)
+                            break
+
+                    successful_count = sum(1 for r in results if r.ok)
+                    if successful_count == 0:
+                        errors = "; ".join(f"{r.source}: {r.error}" for r in results)
+                        raise RuntimeError(f"All anime data providers failed: {errors}")
+
+                    log.info("Background task %s: merging %d/%d provider results", task_id, successful_count, len(results))
+                    profile = merge_profiles(cache_key, results)
+
+                    if user_description:
+                        existing_desc = profile.description.get("summary", "") or ""
+                        profile.description["summary"] = f"{existing_desc}\n\nUser context: {user_description}" if existing_desc else user_description
+
+                    try:
+                        await cache_profile_images(client, self.cache, profile, self.settings.cache_path)
+                    except Exception:
+                        log.warning("Image caching failed, continuing without cached images.")
+
+                self.cache.set("merged", cache_key, profile.model_dump(mode="json"))
+                search_status = self._build_status(results=results, cache_hit=False)
+
             log.info("Background task %s: profile loaded, providers: %s", task_id, list(profile.provider_status.keys()))
         except Exception as exc:
             log.error("Background task %s: search failed: %s", task_id, exc)
-            _update_task(task_id, status="error", error=str(exc), progress=100)
+            _update_task(task_id, status="error", error=str(exc), progress=100, system_status=self._build_status())
             return
-        _update_task(task_id, progress=25, message="Profile loaded. Starting AI agent...", profile=profile.model_dump(mode="json"))
+
+        _update_task(task_id, progress=25, message="Profile loaded. Starting AI agent...", profile=profile.model_dump(mode="json"), system_status=search_status)
+
+        if _get_task(task_id) and _get_task(task_id).get("cancelled"):
+            log.info("Background task %s cancelled after search", task_id)
+            return
 
         ok_providers = [name for name, status in profile.provider_status.items() if status.get("ok")]
         log.info("Background task %s: ok_providers=%s", task_id, ok_providers)
         if not ok_providers:
             rec = fallback_recommendations(profile)
             rec["source_title"] = profile.get_primary_title()
+            rec["system_status"] = search_status
             _update_task(task_id, status="done", progress=100, recommendation=rec, results=rec.get("top_50", []), message="Done (fallback - no providers).")
             return
 
@@ -226,17 +361,28 @@ class AnimeSearchEngine:
         commentary_log: list[str] = []
 
         async def on_tool_call(tool_name: str, args: dict, status: str, result: Any = None) -> None:
+            if _get_task(task_id) and _get_task(task_id).get("cancelled"):
+                raise asyncio.CancelledError("Task cancelled by user")
             task_data = _get_task(task_id) or {}
             calls = task_data.get("tool_calls", [])
-            calls.append({"tool": tool_name, "arguments": args, "status": status, "result": result})
+            safe_result = result
+            if isinstance(result, dict):
+                inner = result.get("result")
+                if isinstance(inner, list) and len(inner) > 3:
+                    safe_result = {"result": inner[:3], "_truncated": True, "_total": len(inner)}
+            calls.append({"tool": tool_name, "arguments": args, "status": status, "result": safe_result})
             _update_task(task_id, tool_calls=calls)
             if status == "running":
                 _update_task(task_id, progress=min(85, 30 + len(calls) * 4), message=f"Agent using tool: {tool_name}...")
 
         async def on_progress(iteration: int, calls: list, text: str) -> None:
+            if _get_task(task_id) and _get_task(task_id).get("cancelled"):
+                raise asyncio.CancelledError("Task cancelled by user")
             _update_task(task_id, progress=min(85, 25 + iteration * 4), message=f"Agent researching... (step {iteration + 1})")
 
         async def on_commentary(line: str) -> None:
+            if _get_task(task_id) and _get_task(task_id).get("cancelled"):
+                raise asyncio.CancelledError("Task cancelled by user")
             commentary_log.append(line)
             _update_task(task_id, commentary=commentary_log[:], message=line)
 
@@ -253,13 +399,21 @@ class AnimeSearchEngine:
                 recommendation = fallback_recommendations(profile)
                 recommendation["engine"] = "jikan-fallback"
                 recommendation["ai_error"] = "Agent returned empty results"
+        except asyncio.CancelledError:
+            log.info("Background task %s: cancelled by user", task_id)
+            return
         except Exception as exc:
             log.warning("Background task %s: agent failed: %s", task_id, exc)
             recommendation = fallback_recommendations(profile)
             recommendation["ai_error"] = str(exc)
 
         recommendation["source_title"] = profile.get_primary_title()
-        _update_task(task_id, status="done", progress=100, recommendation=recommendation, results=recommendation.get("top_50", []), message="Agent research complete!")
+        recommendation["system_status"] = search_status
+
+        ai_status = self._limiter.get_status()
+        recommendation["system_status"]["rate_limits"] = ai_status
+
+        _update_task(task_id, status="done", progress=100, recommendation=recommendation, results=recommendation.get("top_50", []), message="Agent research complete!", system_status=recommendation["system_status"])
 
     def start_background_agent_recommend(
         self,

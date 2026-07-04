@@ -10,10 +10,24 @@ from typing import Any
 import httpx
 from flask import Flask, Response, jsonify, render_template, request
 
-from anime_search.config import load_settings, save_settings
-from anime_search.engine import AnimeSearchEngine, _get_task, cleanup_old_tasks
+from anime_search.config import (
+    auto_init_session,
+    load_settings,
+    save_settings,
+    list_sessions,
+    save_session,
+    load_session,
+    delete_session,
+    rename_session,
+    get_active_session_name,
+    set_active_session_name,
+)
+from anime_search.engine import AnimeSearchEngine, _get_task, cancel_task, cleanup_old_tasks
 
 log = logging.getLogger(__name__)
+
+POSTER_CACHE: dict[str, dict[str, Any]] = {}
+POSTER_CACHE_TTL = 86400
 
 
 def run_async(coro: Any) -> Any:
@@ -22,30 +36,48 @@ def run_async(coro: Any) -> Any:
 
 async def fetch_poster_batch(
     titles: list[str],
+    content_filter: str = "sfw",
     timeout: float = 8.0,
     delay: float = 0.4,
 ) -> dict[str, dict[str, Any]]:
+    now = time.time()
     results: dict[str, dict[str, Any]] = {}
+    to_fetch: list[str] = []
+    for title in titles:
+        cached = POSTER_CACHE.get(title)
+        if cached and now - cached.get("_ts", 0) < POSTER_CACHE_TTL:
+            results[title] = {k: v for k, v in cached.items() if k != "_ts"}
+        else:
+            to_fetch.append(title)
+
+    if not to_fetch:
+        return results
+
     semaphore = asyncio.Semaphore(3)
 
     async def _fetch_one(client: httpx.AsyncClient, title: str) -> None:
         async with semaphore:
             try:
+                params = {"q": title, "limit": 1}
+                if content_filter == "sfw":
+                    params["sfw"] = "true"
+                elif content_filter == "nsfw":
+                    params["rating"] = "rx"
                 response = await client.get(
                     "https://api.jikan.moe/v4/anime",
-                    params={"q": title, "limit": 1, "sfw": "true"},
+                    params=params,
                 )
                 if response.status_code == 429:
                     await asyncio.sleep(1.0)
                     response = await client.get(
                         "https://api.jikan.moe/v4/anime",
-                        params={"q": title, "limit": 1, "sfw": "true"},
+                        params=params,
                     )
                 response.raise_for_status()
                 data = response.json()
                 anime = (data.get("data") or [{}])[0]
                 images = anime.get("images", {}).get("jpg", {}) | anime.get("images", {}).get("webp", {})
-                results[title] = {
+                poster_info = {
                     "poster": images.get("large_image_url") or images.get("image_url"),
                     "score": anime.get("score"),
                     "episodes": anime.get("episodes"),
@@ -54,31 +86,41 @@ async def fetch_poster_batch(
                     "type": anime.get("type"),
                     "source": anime.get("source"),
                 }
+                results[title] = poster_info
+                POSTER_CACHE[title] = {**poster_info, "_ts": time.time()}
             except Exception:
-                results[title] = {"poster": None}
+                poster_info = {"poster": None}
+                results[title] = poster_info
+                POSTER_CACHE[title] = {**poster_info, "_ts": time.time()}
             await asyncio.sleep(delay)
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=5.0)) as client:
-        tasks = [_fetch_one(client, t) for t in titles[:50]]
+        tasks = [_fetch_one(client, t) for t in to_fetch[:50]]
         await asyncio.gather(*tasks, return_exceptions=True)
     return results
 
 
 async def fetch_anime_detail(
     title: str,
+    content_filter: str = "sfw",
     timeout: float = 10.0,
 ) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=5.0)) as client:
+            params = {"q": title, "limit": 1}
+            if content_filter == "sfw":
+                params["sfw"] = "true"
+            elif content_filter == "nsfw":
+                params["rating"] = "rx"
             response = await client.get(
                 "https://api.jikan.moe/v4/anime",
-                params={"q": title, "limit": 1, "sfw": "true"},
+                params=params,
             )
             if response.status_code == 429:
                 await asyncio.sleep(1.0)
                 response = await client.get(
                     "https://api.jikan.moe/v4/anime",
-                    params={"q": title, "limit": 1, "sfw": "true"},
+                    params=params,
                 )
             response.raise_for_status()
             data = response.json()
@@ -129,6 +171,8 @@ def create_app() -> Flask:
         static_folder="anime_search/static",
     )
     settings = load_settings()
+    session_name = auto_init_session(settings)
+    log.info("Active session: %s", session_name)
     engine = AnimeSearchEngine(settings)
 
     @app.get("/")
@@ -137,13 +181,16 @@ def create_app() -> Flask:
 
     @app.get("/api/config")
     def api_config_get() -> Any:
-        d = engine.settings.to_dict()
+        d = engine.settings.to_dict(include_secrets=False)
         return jsonify(d)
 
     @app.post("/api/config")
     def api_config_post() -> Any:
         nonlocal settings, engine
         payload = request.get_json(silent=True) or {}
+        from anime_search.config import SENSITIVE_KEYS
+        for key in SENSITIVE_KEYS:
+            payload.pop(key, None)
         try:
             new_settings = engine.settings.from_dict(payload)
             validation_error = new_settings.validate_ai_provider()
@@ -152,7 +199,10 @@ def create_app() -> Flask:
             settings = new_settings
             save_settings(settings)
             engine = AnimeSearchEngine(settings)
-            return jsonify({"status": "ok", "config": engine.settings.to_dict()})
+            active = get_active_session_name()
+            if active:
+                save_session(active, settings)
+            return jsonify({"status": "ok", "config": engine.settings.to_dict(include_secrets=False)})
         except Exception as exc:
             log.error("Config update failed: %s", exc)
             return jsonify({"error": str(exc)}), 400
@@ -214,6 +264,16 @@ def create_app() -> Flask:
         task = _get_task(task_id)
         if task is None:
             return jsonify({"error": "Task not found."}), 404
+        recommendation = task.get("recommendation")
+        if recommendation:
+            try:
+                json.dumps(recommendation, default=str)
+            except Exception:
+                recommendation = {
+                    "top_50": task.get("results", [])[:50],
+                    "source_title": recommendation.get("source_title", ""),
+                    "engine": recommendation.get("engine", "agent"),
+                }
         return jsonify({
             "task_id": task_id,
             "status": task.get("status", "unknown"),
@@ -222,8 +282,9 @@ def create_app() -> Flask:
             "results": task.get("results", []),
             "error": task.get("error"),
             "profile": task.get("profile"),
-            "recommendation": task.get("recommendation"),
+            "recommendation": recommendation,
             "tool_calls": task.get("tool_calls", []),
+            "system_status": task.get("system_status", {}),
         })
 
     @app.get("/api/ai/stream/<task_id>")
@@ -241,6 +302,7 @@ def create_app() -> Flask:
                 results = task.get("results", [])
                 raw_text = task.get("raw_text", "")
                 commentary = task.get("commentary", [])
+                system_status = task.get("system_status", {})
                 now = time.time()
                 if now - last_update >= 0.2 or status in ("done", "error"):
                     payload = {
@@ -255,7 +317,27 @@ def create_app() -> Flask:
                         payload["raw_length"] = len(raw_text)
                     if commentary:
                         payload["commentary"] = commentary[-20:]
-                    yield f"data: {json.dumps(payload)}\n\n"
+                    if system_status:
+                        payload["system_status"] = system_status
+                    if status == "done":
+                        recommendation = task.get("recommendation")
+                        if recommendation:
+                            try:
+                                json.dumps(recommendation, default=str)
+                                payload["recommendation"] = recommendation
+                            except Exception:
+                                payload["recommendation"] = {
+                                    "top_50": results[:50],
+                                    "source_title": recommendation.get("source_title", ""),
+                                    "engine": recommendation.get("engine", "agent"),
+                                }
+                    try:
+                        yield f"data: {json.dumps(payload, default=str)}\n\n"
+                    except Exception as exc:
+                        log.warning("SSE serialization failed: %s", exc)
+                        safe_payload = {k: v for k, v in payload.items() if k != "recommendation"}
+                        safe_payload["recommendation"] = {"top_50": results[:50]}
+                        yield f"data: {json.dumps(safe_payload, default=str)}\n\n"
                     last_update = now
                 if status in ("done", "error"):
                     return
@@ -264,13 +346,69 @@ def create_app() -> Flask:
         return Response(generate(), mimetype="text/event-stream",
                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
+    @app.post("/api/ai/cancel/<task_id>")
+    def api_ai_cancel(task_id: str) -> Any:
+        if cancel_task(task_id):
+            return jsonify({"status": "cancelled", "task_id": task_id})
+        return jsonify({"error": "Task not found or already finished."}), 404
+
+    @app.get("/api/sessions")
+    def api_sessions_list() -> Any:
+        return jsonify({"sessions": list_sessions(), "active": get_active_session_name()})
+
+    @app.post("/api/sessions/save")
+    def api_sessions_save() -> Any:
+        payload = request.get_json(silent=True) or {}
+        name = str(payload.get("name", "")).strip()
+        if not name:
+            return jsonify({"error": "Session name is required."}), 400
+        label = str(payload.get("label", "")).strip()
+        save_session(name, engine.settings, label)
+        set_active_session_name(name)
+        save_settings(engine.settings)
+        return jsonify({"status": "ok", "name": name})
+
+    @app.post("/api/sessions/load")
+    def api_sessions_load() -> Any:
+        nonlocal settings, engine
+        payload = request.get_json(silent=True) or {}
+        name = str(payload.get("name", "")).strip()
+        if not name:
+            return jsonify({"error": "Session name is required."}), 400
+        session_settings = load_session(name)
+        if session_settings is None:
+            return jsonify({"error": f"Session '{name}' not found."}), 404
+        settings = session_settings
+        save_settings(settings)
+        set_active_session_name(name)
+        engine = AnimeSearchEngine(settings)
+        return jsonify({"status": "ok", "config": engine.settings.to_dict(include_secrets=False), "session": name})
+
+    @app.delete("/api/sessions/<name>")
+    def api_sessions_delete(name: str) -> Any:
+        if delete_session(name):
+            return jsonify({"status": "deleted", "name": name})
+        return jsonify({"error": f"Session '{name}' not found."}), 404
+
+    @app.post("/api/sessions/rename")
+    def api_sessions_rename() -> Any:
+        payload = request.get_json(silent=True) or {}
+        old_name = str(payload.get("old_name", "")).strip()
+        new_name = str(payload.get("new_name", "")).strip()
+        if not old_name or not new_name:
+            return jsonify({"error": "old_name and new_name are required."}), 400
+        if rename_session(old_name, new_name):
+            return jsonify({"status": "renamed", "old_name": old_name, "new_name": new_name})
+        return jsonify({"error": "Rename failed."}), 400
+
     @app.get("/api/anime/detail")
     def api_anime_detail() -> Any:
         title = request.args.get("title", "").strip()
+        content_filter = request.args.get("content_filter", "sfw").strip()
         if not title:
             return jsonify({"error": "Missing title parameter."}), 400
         try:
-            detail = run_async(fetch_anime_detail(title))
+            detail = run_async(fetch_anime_detail(title, content_filter))
             return jsonify(detail)
         except Exception as exc:
             log.error("Anime detail fetch failed: %s", exc)
@@ -280,10 +418,11 @@ def create_app() -> Flask:
     def api_recommend_posters() -> Any:
         payload = request.get_json(silent=True) or {}
         titles = payload.get("titles") or []
+        content_filter = payload.get("content_filter", "sfw")
         if not isinstance(titles, list) or not titles:
             return jsonify({"error": "Missing titles array."}), 400
         try:
-            results = run_async(fetch_poster_batch([str(t) for t in titles[:50]]))
+            results = run_async(fetch_poster_batch([str(t) for t in titles[:50]], content_filter))
             return jsonify(results)
         except Exception as exc:
             log.error("Poster fetch failed: %s", exc)
@@ -298,6 +437,8 @@ def create_app() -> Flask:
             "ai_base_url": engine.settings.effective_ai_base_url,
             "lm_studio_url": engine.settings.local_ai_base_url,
             "model": engine.settings.local_ai_model,
+            "cache": engine.cache.get_stats(),
+            "rate_limits": engine._limiter.get_status(),
         })
 
     @app.post("/api/test-connection")
@@ -324,6 +465,72 @@ def create_app() -> Flask:
     def api_tools() -> Any:
         from anime_search.tools import TOOL_DEFINITIONS
         return jsonify({"tools": TOOL_DEFINITIONS})
+
+    @app.get("/api/models/status")
+    def api_models_status() -> Any:
+        import asyncio as _aio
+        import time as _time
+
+        settings = engine.settings
+        if settings.ai_provider != "openrouter" or not settings.ai_api_key:
+            return jsonify({"models": [], "error": "Not configured for OpenRouter"})
+
+        models_to_check = [settings.openrouter_model] + [
+            m.strip() for m in settings.openrouter_fallback_models.split(",") if m.strip()
+        ]
+        models_to_check = list(dict.fromkeys(models_to_check))
+
+        async def _check():
+            results = []
+            async with httpx.AsyncClient(timeout=httpx.Timeout(15, connect=5)) as client:
+                for model in models_to_check:
+                    payload = {
+                        "model": model,
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "max_tokens": 5,
+                    }
+                    t0 = _time.monotonic()
+                    try:
+                        resp = await client.post(
+                            settings.effective_ai_base_url.rstrip("/") + "/v1/chat/completions",
+                            json=payload,
+                            headers=settings.llm_headers,
+                        )
+                        elapsed_ms = int((_time.monotonic() - t0) * 1000)
+                        ok = resp.status_code == 200
+                        rate_limited = resp.status_code == 429
+                        results.append({
+                            "model": model,
+                            "status": "ok" if ok else ("rate_limited" if rate_limited else "error"),
+                            "status_code": resp.status_code,
+                            "latency_ms": elapsed_ms,
+                            "is_primary": model == settings.openrouter_model,
+                        })
+                    except Exception as exc:
+                        elapsed_ms = int((_time.monotonic() - t0) * 1000)
+                        results.append({
+                            "model": model,
+                            "status": "error",
+                            "status_code": 0,
+                            "latency_ms": elapsed_ms,
+                            "error": str(exc)[:200],
+                            "is_primary": model == settings.openrouter_model,
+                        })
+            return results
+
+        try:
+            models = _aio.run(_check())
+        except Exception as exc:
+            return jsonify({"models": [], "error": str(exc)}), 500
+        return jsonify({"models": models})
+
+    @app.get("/api/system/status")
+    def api_system_status() -> Any:
+        return jsonify({
+            "cache": engine.cache.get_stats(),
+            "rate_limits": engine._limiter.get_status(),
+            "poster_cache_size": len(POSTER_CACHE),
+        })
 
     return app
 

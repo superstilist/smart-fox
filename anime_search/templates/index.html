@@ -7,341 +7,357 @@
     <title>AI Anime Search</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet" />
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
   </head>
   <body>
-    <main class="shell">
-      <section class="search-band">
-        <div class="brand-block">
-          <div class="header-row">
-            <div>
-              <p class="eyebrow">AI-powered anime discovery</p>
-              <h1>AI Anime Search</h1>
-            </div>
-            <button class="theme-toggle" id="theme-toggle" type="button" title="Toggle theme">
-              <span class="icon-sun">&#9728;</span>
-              <span class="icon-moon">&#9790;</span>
-              <span class="theme-label">Theme</span>
-            </button>
-            <button class="settings-toggle" id="settings-toggle" type="button" title="Settings">
-              <span class="icon-gear">&#9881;</span>
-            </button>
-          </div>
+    <header class="md-top-app-bar">
+      <div class="md-top-app-bar-inner">
+        <div class="brand">
+          <span class="material-symbols-rounded md-primary-icon">smart_toy</span>
+          <span class="md-typescale-title-large">AI Anime Search</span>
         </div>
-        <form class="search-form" method="post" action="/search" data-loading-form>
-          <div class="input-group">
-            <div class="input-row">
-              <div class="input-wrap grow">
-                <label for="query">Anime title</label>
-                <input id="query" name="query" value="{{ query }}" placeholder="Cowboy Bebop" autocomplete="off">
-              </div>
+        <div class="actions">
+          <button class="md-icon-btn theme-toggle" id="theme-toggle" type="button" title="Toggle theme">
+            <span class="material-symbols-rounded icon-sun" style="display:none;">light_mode</span>
+            <span class="material-symbols-rounded icon-moon">dark_mode</span>
+          </button>
+          <button class="md-icon-btn" id="settings-toggle" type="button" title="Settings">
+            <span class="material-symbols-rounded">settings</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="md-container">
+      <section class="search-section">
+        <div class="md-card md-card-elevated search-card">
+          <div class="search-card-header">
+            <h2 class="md-typescale-headline-small">Find your next anime</h2>
+            <p class="md-typescale-body-medium md-color-muted">Search by title or describe what you want — AI will find it.</p>
+          </div>
+          <form class="search-form" method="post" action="/search" data-loading-form>
+            <div class="md-text-field md-filled">
+              <label for="query">Anime title</label>
+              <input id="query" name="query" value="{{ query }}" placeholder="Cowboy Bebop" autocomplete="off">
             </div>
-            <div class="input-wrap">
-              <label for="description">Describe what you want - AI will find it</label>
-              <textarea id="description" name="description" rows="2" placeholder="A space western with jazz music, cool bounty hunters, and episodic adventures...">{{ description if description else "" }}</textarea>
-              <p class="input-hint">Type a description and AI will search based on your words. No title needed.</p>
+            
+            <div class="md-text-field md-filled">
+              <label for="description">Description (AI Search)</label>
+              <textarea id="description" name="description" rows="2" placeholder="A space western with jazz music, cool bounty hunters...">{{ description if description else "" }}</textarea>
             </div>
-            <div class="filter-row">
-              <div class="input-wrap">
+            
+            <div class="search-filters">
+              <div class="md-text-field md-filled select-field">
                 <label for="content_filter">Content Filter</label>
                 <select id="content_filter" name="content_filter">
                   <option value="sfw" {{ 'selected' if content_filter == 'sfw' else '' }}>SFW Only</option>
                   <option value="all" {{ 'selected' if content_filter == 'all' else '' }}>All (SFW + NSFW)</option>
                   <option value="nsfw" {{ 'selected' if content_filter == 'nsfw' else '' }}>NSFW Only</option>
                 </select>
+                <span class="material-symbols-rounded dropdown-icon">arrow_drop_down</span>
               </div>
-              <div class="input-wrap grow">
-                <label for="negative_prompt">Exclude (negative prompt)</label>
-                <input id="negative_prompt" name="negative_prompt" value="{{ negative_prompt if negative_prompt else '' }}" placeholder="harem, ecchi, mecha" autocomplete="off">
-                <p class="input-hint">Comma-separated genres/themes to exclude from results.</p>
+              <div class="md-text-field md-filled flex-grow">
+                <label for="negative_prompt">Exclude tags (comma-separated)</label>
+                <input id="negative_prompt" name="negative_prompt" value="{{ negative_prompt if negative_prompt else '' }}" placeholder="harem, mecha" autocomplete="off">
               </div>
             </div>
-          </div>
-          <div class="form-actions">
-            <button type="submit">
-              <span class="icon">&#x2315;</span>
-              <span>Search</span>
-            </button>
-          </div>
-        </form>
+            
+            <div class="search-actions">
+              <button class="md-btn md-btn-filled" type="submit">
+                <span class="material-symbols-rounded">search</span>
+                Search
+              </button>
+            </div>
+          </form>
+        </div>
       </section>
 
       {% if error %}
-        <section class="alert">{{ error }}</section>
+        <section class="md-alert md-alert-error">
+          <span class="material-symbols-rounded">error</span>
+          <span>{{ error }}</span>
+        </section>
       {% endif %}
 
       {% if profile %}
-        <section class="overview">
-          <div class="poster-panel">
-            {% if profile.media.poster %}
-              <img src="{{ profile.media.poster }}" alt="{{ profile.titles.all[0] if profile.titles.all else query }} poster">
+        <section class="profile-layout">
+          <div class="hero-banner">
+            {% if profile.media.banner %}
+              <img src="{{ profile.media.banner }}" alt="Banner" class="banner-img">
+              <div class="banner-scrim"></div>
             {% endif %}
           </div>
-          <div class="summary-panel">
-            <div class="title-row">
-              <div>
-                <p class="eyebrow">Unified profile</p>
-                <h2>{{ profile.titles.all[0] if profile.titles.all else query }}</h2>
-              </div>
-              <div class="score-grid">
-                {% for source, status in profile.provider_status.items() %}
-                  <div class="source-pill {{ 'ok' if status.ok else 'fail' }}">
-                    <span>{{ source }}</span>
-                    <strong>{{ (status.confidence * 100)|round|int }}%</strong>
-                  </div>
-                {% endfor %}
-              </div>
-            </div>
-            <p class="description">{{ profile.description.summary or "No description found." }}</p>
-            <div class="tag-row">
-              {% for genre in profile.genres[:12] %}
-                <span>{{ genre }}</span>
-              {% endfor %}
-              {% for theme in profile.themes[:12] %}
-                <span class="theme">{{ theme }}</span>
-              {% endfor %}
-            </div>
-          </div>
-        </section>
-
-        <section class="metric-strip">
-          <div><span>Characters</span><strong>{{ profile.characters|length }}</strong></div>
-          <div><span>Recommendations</span><strong>{{ profile.recommendations|length }}</strong></div>
-          <div><span>Studios</span><strong>{{ profile.studios|length }}</strong></div>
-          <div><span>Themes</span><strong>{{ profile.themes|length }}</strong></div>
-        </section>
-
-        <section class="content-grid">
-          <article class="panel info-panel">
-            <h3>Anime Details</h3>
-            <div class="info-grid">
-              {% if profile.release %}
-                {% for source, release in profile.release.items() %}
-                  <div class="info-item">
-                    <span class="info-label">Status ({{ source }})</span>
-                    <span class="info-value">{{ release.status or "Unknown" }}</span>
-                  </div>
-                  {% if release.episodes %}
-                    <div class="info-item">
-                      <span class="info-label">Episodes</span>
-                      <span class="info-value">{{ release.episodes }}</span>
-                    </div>
-                  {% endif %}
-                  {% if release.rating %}
-                    <div class="info-item">
-                      <span class="info-label">Rating</span>
-                      <span class="info-value">{{ release.rating }}</span>
-                    </div>
-                  {% endif %}
-                {% endfor %}
-              {% endif %}
-              {% for source, stats in profile.statistics.items() %}
-                {% if stats.score or stats.average_score %}
-                  <div class="info-item">
-                    <span class="info-label">Score ({{ source }})</span>
-                    <span class="info-value">{{ stats.score or stats.average_score or "N/A" }}</span>
+          
+          <div class="profile-grid">
+            <aside class="profile-sidebar">
+              <div class="poster-container md-elevation-3">
+                {% if profile.media.poster %}
+                  <img src="{{ profile.media.poster }}" alt="{{ profile.titles.all[0] if profile.titles.all else query }} poster">
+                {% else %}
+                  <div class="poster-placeholder">
+                    <span class="material-symbols-rounded">image_not_supported</span>
                   </div>
                 {% endif %}
-                {% if stats.popularity %}
-                  <div class="info-item">
-                    <span class="info-label">Popularity</span>
-                    <span class="info-value">#{{ stats.popularity }}</span>
-                  </div>
-                {% endif %}
-              {% endfor %}
-              {% if profile.studios %}
-                <div class="info-item full-width">
-                  <span class="info-label">Studios</span>
-                  <span class="info-value">{{ profile.studios|join(', ') }}</span>
-                </div>
-              {% endif %}
-              {% if profile.titles.romaji %}
-                <div class="info-item full-width">
-                  <span class="info-label">Japanese Title</span>
-                  <span class="info-value">{{ profile.titles.romaji[0] }}</span>
-                </div>
-              {% endif %}
-            </div>
-          </article>
+              </div>
 
-          <article class="panel">
-            <h3>Media</h3>
-            <div class="media-grid">
-              {% if profile.media.banner %}
-                <img src="{{ profile.media.banner }}" alt="Banner">
-              {% endif %}
+              <div class="md-card md-card-filled stats-card">
+                <div class="stats-grid">
+                  {% for source, status in profile.provider_status.items() %}
+                    <div class="stat-item {{ 'status-ok' if status.ok else 'status-fail' }}">
+                      <span class="stat-label">{{ source }}</span>
+                      <strong class="stat-value">{{ (status.confidence * 100)|round|int }}%</strong>
+                    </div>
+                  {% endfor %}
+                  <div class="stat-item">
+                    <span class="stat-label">Characters</span>
+                    <strong class="stat-value">{{ profile.characters|length }}</strong>
+                  </div>
+                  <div class="stat-item">
+                    <span class="stat-label">Studios</span>
+                    <strong class="stat-value">{{ profile.studios|length }}</strong>
+                  </div>
+                </div>
+              </div>
+
               {% if profile.media.trailer %}
-                <a class="media-link" href="{{ profile.media.trailer }}" target="_blank" rel="noreferrer">Trailer</a>
+                <a class="md-btn md-btn-outlined full-width" href="{{ profile.media.trailer }}" target="_blank" rel="noreferrer">
+                  <span class="material-symbols-rounded">play_circle</span>
+                  Watch Trailer
+                </a>
               {% endif %}
-            </div>
-          </article>
+            </aside>
+            
+            <div class="profile-main">
+              <div class="title-section">
+                <h1 class="md-typescale-display-small">{{ profile.titles.all[0] if profile.titles.all else query }}</h1>
+                {% if profile.titles.romaji and profile.titles.romaji[0] != profile.titles.all[0] %}
+                  <h2 class="md-typescale-title-medium md-color-muted">{{ profile.titles.romaji[0] }}</h2>
+                {% endif %}
+              </div>
+              
+              <p class="md-typescale-body-large synopsis">{{ profile.description.summary or "No description found." }}</p>
+              
+              <div class="chips-container">
+                {% for genre in profile.genres[:12] %}
+                  <span class="md-chip md-chip-primary">{{ genre }}</span>
+                {% endfor %}
+                {% for theme in profile.themes[:12] %}
+                  <span class="md-chip md-chip-secondary">{{ theme }}</span>
+                {% endfor %}
+              </div>
 
-          <article class="panel wide">
-            <h3>Characters</h3>
-            <div class="character-grid">
-              {% for character in profile.characters[:24] %}
-                <div class="character-card">
-                  {% if character.image %}
-                    <img src="{{ character.image }}" alt="{{ character.name }}">
+              <div class="md-card md-card-outlined details-card">
+                <h3 class="md-typescale-title-large">Details</h3>
+                <div class="info-grid">
+                  {% if profile.release %}
+                    {% for source, release in profile.release.items() %}
+                      <div class="info-item">
+                        <span class="info-label">Status ({{ source }})</span>
+                        <span class="info-value">{{ release.status or "Unknown" }}</span>
+                      </div>
+                      {% if release.episodes %}
+                        <div class="info-item">
+                          <span class="info-label">Episodes</span>
+                          <span class="info-value">{{ release.episodes }}</span>
+                        </div>
+                      {% endif %}
+                      {% if release.rating %}
+                        <div class="info-item">
+                          <span class="info-label">Rating</span>
+                          <span class="info-value">{{ release.rating }}</span>
+                        </div>
+                      {% endif %}
+                    {% endfor %}
                   {% endif %}
-                  <div>
-                    <strong>{{ character.name }}</strong>
-                    <span>{{ character.role or "Character" }}</span>
+                  {% for source, stats in profile.statistics.items() %}
+                    {% if stats.score or stats.average_score %}
+                      <div class="info-item">
+                        <span class="info-label">Score ({{ source }})</span>
+                        <span class="info-value">
+                          <span class="material-symbols-rounded star-icon">star</span>
+                          {{ stats.score or stats.average_score or "N/A" }}
+                        </span>
+                      </div>
+                    {% endif %}
+                  {% endfor %}
+                </div>
+              </div>
+
+              {% if profile.characters %}
+                <div class="md-card md-card-filled characters-card">
+                  <h3 class="md-typescale-title-large">Characters</h3>
+                  <div class="character-grid">
+                    {% for character in profile.characters[:24] %}
+                      <div class="character-item">
+                        <div class="character-avatar">
+                          {% if character.image %}
+                            <img src="{{ character.image }}" alt="{{ character.name }}">
+                          {% else %}
+                            <span class="material-symbols-rounded">person</span>
+                          {% endif %}
+                        </div>
+                        <div class="character-info">
+                          <span class="md-typescale-label-large">{{ character.name }}</span>
+                          <span class="md-typescale-body-small md-color-muted">{{ character.role or "Character" }}</span>
+                        </div>
+                      </div>
+                    {% endfor %}
                   </div>
                 </div>
-              {% endfor %}
-            </div>
-          </article>
+              {% endif %}
 
-          <article class="panel wide">
-            <h3>Source Recommendations</h3>
-            <div class="recommendation-list">
-              {% for item in profile.recommendations[:20] %}
-                <a href="{{ item.url or '#' }}" target="_blank" rel="noreferrer">
-                  <strong>{{ item.title }}</strong>
-                  <span>{{ item.source }}</span>
-                </a>
-              {% endfor %}
-            </div>
-          </article>
-
-          <article class="panel wide" id="ai-status-panel" style="display:none;">
-            <h3>AI Search Status</h3>
-            <div class="ai-status-box">
-              <div class="status-header">
-                <div class="status-text" id="ai-status-text">Initializing...</div>
-                <div class="status-count" id="ai-status-count">0 found</div>
+              <div class="md-card md-card-filled wide" id="ai-status-panel" style="display:none;">
+                <h3 class="md-typescale-title-large">AI Search Status</h3>
+                <div class="ai-status-box">
+                  <div class="status-header">
+                    <div class="status-text md-typescale-body-medium" id="ai-status-text">Initializing...</div>
+                    <div class="status-count md-typescale-label-large" id="ai-status-count">0 found</div>
+                  </div>
+                  <div class="md-linear-progress">
+                    <div class="md-linear-progress-bar" id="ai-status-bar" style="width: 0%"></div>
+                  </div>
+                  <div class="status-detail md-typescale-body-small md-color-muted" id="ai-status-detail"></div>
+                  <button class="md-btn md-btn-text" id="cancel-search-btn" type="button" style="display:none;">Cancel</button>
+                </div>
               </div>
-              <div class="status-bar-wrap">
-                <div class="status-bar" id="ai-status-bar" style="width: 0%"></div>
+
+              <div class="md-card md-card-elevated wide" id="ai-recommendations">
+                <div class="rec-header">
+                  <h3 class="md-typescale-title-large" id="ai-rec-title">AI Recommendations <span id="rec-total-count" class="rec-count md-color-muted"></span></h3>
+                  <button class="md-icon-btn" onclick="shareRecommendations()" title="Share">
+                    <span class="material-symbols-rounded">share</span>
+                  </button>
+                </div>
+                <p class="md-typescale-body-small md-color-muted rec-hint">Click any card to see full anime details</p>
+                <div class="ai-rec-grid" id="rec-grid" data-source-title="{{ recommendation.source_title if recommendation else query }}">
+                </div>
+                {% if recommendation %}
+                  <details class="md-details">
+                    <summary>Recommendation JSON</summary>
+                    <pre>{{ recommendation_json }}</pre>
+                  </details>
+                {% endif %}
               </div>
-              <div class="status-detail" id="ai-status-detail"></div>
-            </div>
-          </article>
 
-          <article class="panel wide" id="ai-recommendations">
-            <div class="rec-section-header">
-              <h3 id="ai-rec-title">Recommendations <span id="rec-total-count" class="rec-count"></span></h3>
-              <button class="share-btn" onclick="shareRecommendations()" title="Share">Share</button>
             </div>
-            <p class="rec-hint">Click any card to see full anime details</p>
-            <div class="ai-rec-grid" id="rec-grid" data-source-title="{{ recommendation.source_title if recommendation else query }}">
-            </div>
-            {% if recommendation %}
-              <details>
-                <summary>Recommendation JSON</summary>
-                <pre>{{ recommendation_json }}</pre>
-              </details>
-            {% endif %}
-          </article>
-
-          <article class="panel wide">
-            <h3>Unified JSON</h3>
-            <pre>{{ profile_json }}</pre>
-          </article>
-        </section>
-      {% else %}
-        <section class="empty-state">
-          <div>
-            <h2>Search by title or describe what you want.</h2>
-            <p>Type a description like "funny school anime with romance" and AI will find matching anime for you. AniList, Jikan, and Kitsu data is merged, then AI generates personalized recommendations. Click any recommendation to see full details.</p>
           </div>
         </section>
       {% endif %}
     </main>
 
-    <div class="detail-modal" id="detail-modal" style="display:none;">
-      <div class="detail-overlay" onclick="closeDetail()"></div>
-      <div class="detail-panel">
-        <button class="detail-close" onclick="closeDetail()">&times;</button>
-        <div class="detail-loading" id="detail-loading">
-          <div class="loader"></div>
-          <span>Loading anime details...</span>
+    <div class="md-dialog-scrim" id="detail-modal" style="display:none;">
+      <div class="md-dialog" role="dialog" aria-modal="true">
+        <div class="md-dialog-header">
+          <h2 class="md-typescale-title-large">Anime Details</h2>
+          <button class="md-icon-btn" onclick="closeDetail()">
+            <span class="material-symbols-rounded">close</span>
+          </button>
         </div>
-        <div class="detail-content" id="detail-content" style="display:none;"></div>
+        <div class="md-dialog-content">
+          <div class="detail-loading" id="detail-loading">
+            <div class="md-circular-progress"></div>
+            <span class="md-typescale-body-medium">Loading details...</span>
+          </div>
+          <div id="detail-content" style="display:none;"></div>
+        </div>
       </div>
     </div>
 
-    <div class="settings-modal" id="settings-modal" style="display:none;">
-      <div class="settings-overlay" onclick="closeSettings()"></div>
-      <div class="settings-panel">
-        <button class="settings-close" onclick="closeSettings()">&times;</button>
-        <h2>Settings</h2>
-        <div class="settings-content">
-
-          <div class="settings-section provider-select-section">
-            <label for="cfg-ai-provider">AI Provider</label>
+    <div class="md-dialog-scrim" id="settings-modal" style="display:none;">
+      <div class="md-dialog md-dialog-large" role="dialog" aria-modal="true">
+        <div class="md-dialog-header">
+          <h2 class="md-typescale-title-large">Settings</h2>
+          <button class="md-icon-btn" onclick="closeSettings()">
+            <span class="material-symbols-rounded">close</span>
+          </button>
+        </div>
+        <div class="md-dialog-content">
+          <div class="settings-section">
+            <h3 class="md-typescale-title-medium">AI Provider</h3>
             <div class="provider-cards">
               <label class="provider-card active" data-provider="local">
                 <input type="radio" name="ai_provider" value="local" id="cfg-ai-provider" checked>
                 <div class="provider-card-inner">
-                  <div class="provider-icon">&#128421;</div>
+                  <span class="material-symbols-rounded md-icon-large">dns</span>
                   <strong>Local</strong>
-                  <span>LM Studio</span>
+                  <span class="md-typescale-body-small">LM Studio</span>
                 </div>
               </label>
               <label class="provider-card" data-provider="openrouter">
                 <input type="radio" name="ai_provider" value="openrouter">
                 <div class="provider-card-inner">
-                  <div class="provider-icon">&#9889;</div>
+                  <span class="material-symbols-rounded md-icon-large">cloud</span>
                   <strong>OpenRouter</strong>
-                  <span>Cloud API</span>
+                  <span class="md-typescale-body-small">Cloud API</span>
                 </div>
               </label>
             </div>
           </div>
 
-          <div class="settings-section provider-section" id="settings-local-section">
-            <h3>&#128421; Local AI (LM Studio)</h3>
-            <div class="settings-field">
-              <label for="cfg-local-base-url">URL</label>
+          <div class="settings-section" id="settings-local-section">
+            <h3 class="md-typescale-title-medium"><span class="material-symbols-rounded">dns</span> Local AI (LM Studio)</h3>
+            <div class="md-text-field md-outlined">
+              <label for="cfg-local-base-url">URL (LM Studio server)</label>
               <input type="text" id="cfg-local-base-url" placeholder="http://127.0.0.1:1234">
-              <p class="field-hint">LM Studio server address</p>
             </div>
             <div class="settings-row">
-              <div class="settings-field">
+              <div class="md-text-field md-outlined">
                 <label for="cfg-local-model">Model</label>
                 <input type="text" id="cfg-local-model" placeholder="google/gemma-4-e2b">
               </div>
-              <div class="settings-field">
+              <div class="md-text-field md-outlined">
                 <label for="cfg-local-api-key">API Key</label>
                 <input type="password" id="cfg-local-api-key" placeholder="local-key">
               </div>
             </div>
           </div>
 
-          <div class="settings-section provider-section" id="settings-openrouter-section" style="display:none;">
-            <h3>&#9889; OpenRouter</h3>
-            <div class="settings-field">
+          <div class="settings-section" id="settings-openrouter-section" style="display:none;">
+            <h3 class="md-typescale-title-medium"><span class="material-symbols-rounded">cloud</span> OpenRouter</h3>
+            <div class="md-text-field md-outlined">
               <label for="cfg-openrouter-api-key">API Key *</label>
               <input type="password" id="cfg-openrouter-api-key" placeholder="sk-or-v1-...">
-              <p class="field-hint">Get yours at <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">openrouter.ai/keys</a></p>
             </div>
             <div class="settings-row">
-              <div class="settings-field grow">
+              <div class="md-text-field md-outlined flex-grow">
                 <label for="cfg-openrouter-model">Model</label>
                 <input type="text" id="cfg-openrouter-model" placeholder="google/gemma-4-31b-it:free">
               </div>
-              <div class="settings-field">
+              <div class="md-text-field md-outlined">
                 <label for="cfg-openrouter-base-url">API Base</label>
                 <input type="text" id="cfg-openrouter-base-url" placeholder="https://openrouter.ai/api">
               </div>
             </div>
+            <div class="md-text-field md-outlined">
+              <label for="cfg-openrouter-fallback">Fallback Models</label>
+              <input type="text" id="cfg-openrouter-fallback" placeholder="google/gemma-4-26b-a4b-it:free, meta-llama/llama-3.3-70b-instruct:free">
+            </div>
+          </div>
+
+          <div class="settings-section" id="settings-model-status-section" style="display:none;">
+            <div class="model-status-header">
+              <h3 class="md-typescale-title-medium"><span class="material-symbols-rounded">build</span> Model Status</h3>
+              <button id="settings-refresh-models" class="md-btn md-btn-outlined md-btn-small" type="button">Refresh</button>
+            </div>
+            <div class="model-status-grid" id="model-status-grid">
+              <div class="model-status-loading">Click Refresh to check model status...</div>
+            </div>
           </div>
 
           <div class="settings-section">
-            <h3>Parameters</h3>
+            <h3 class="md-typescale-title-medium">Parameters</h3>
             <div class="settings-row">
-              <div class="settings-field">
+              <div class="md-text-field md-outlined">
                 <label for="cfg-ai-temperature">Temperature</label>
                 <input type="number" id="cfg-ai-temperature" min="0" max="2" step="0.05">
               </div>
-              <div class="settings-field">
+              <div class="md-text-field md-outlined">
                 <label for="cfg-ai-max-tokens">Max Tokens</label>
                 <input type="number" id="cfg-ai-max-tokens" min="256" max="32768" step="256">
               </div>
-              <div class="settings-field">
+              <div class="md-text-field md-outlined">
                 <label for="cfg-ai-timeout">Timeout (s)</label>
                 <input type="number" id="cfg-ai-timeout" min="10" max="600" step="10">
               </div>
@@ -349,42 +365,36 @@
           </div>
 
           <div class="settings-section">
-            <h3>Agent</h3>
+            <h3 class="md-typescale-title-medium">Agent</h3>
             <div class="settings-row">
-              <div class="settings-field">
+              <div class="md-text-field md-outlined">
                 <label for="cfg-agent-max-iterations">Max Iterations</label>
                 <input type="number" id="cfg-agent-max-iterations" min="1" max="50" step="1">
               </div>
-              <div class="settings-field">
+              <div class="md-text-field md-outlined">
                 <label for="cfg-agent-max-tool-calls">Max Tool Calls</label>
                 <input type="number" id="cfg-agent-max-tool-calls" min="1" max="100" step="1">
               </div>
             </div>
           </div>
-
-          <div class="settings-actions">
-            <button id="settings-save" class="settings-btn primary">Save</button>
-            <button id="settings-test" class="settings-btn">Test Connection</button>
-            <button id="settings-reset" class="settings-btn danger">Reset Defaults</button>
-            <div class="settings-status" id="settings-status"></div>
-          </div>
+        </div>
+        <div class="md-dialog-actions">
+          <div class="settings-status md-typescale-body-small" id="settings-status"></div>
+          <button id="settings-reset" class="md-btn md-btn-text md-color-error">Reset</button>
+          <button id="settings-test" class="md-btn md-btn-outlined">Test Connection</button>
+          <button id="settings-save" class="md-btn md-btn-filled">Save</button>
         </div>
       </div>
     </div>
 
-    <div class="loading-overlay" data-loading hidden>
-      <div class="loading-box">
-        <div class="fox-ai-loader">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="fox-svg">
-            <path d="M19 4l-4 3-3-3-3 3-4-3c0 6 2 11 5 13l2 2 2-2c3-2 5-7 5-13z"/>
-            <path d="M9 13l1 1 M15 13l-1 1"/>
-            <circle cx="12" cy="18" r="1" fill="currentColor"/>
-          </svg>
-        </div>
-        <span class="loading-title">Fox AI is thinking...</span>
-        <span class="loading-sub">Searching anime databases for matches</span>
+    <div class="md-loading-scrim" data-loading hidden>
+      <div class="md-card md-card-elevated loading-card">
+        <div class="md-circular-progress"></div>
+        <span class="md-typescale-title-medium">Fox AI is thinking...</span>
+        <span class="md-typescale-body-medium md-color-muted">Searching anime databases for matches</span>
       </div>
     </div>
+    
     <div id="profile-data" data-profile="{{ profile|tojson if profile else '' }}" hidden></div>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
