@@ -1,0 +1,15 @@
+# API Keys Configuration
+# Copy this file to apikey.conf and fill in your keys.
+# Never commit apikey.conf to git.
+#
+# Format: KEY=VALUE (one per line)
+# Lines starting with # are ignored.
+# Empty values are allowed.
+
+# ── OpenRouter ──
+# Get your key at: https://openrouter.ai/keys
+OPENROUTER_API_KEY=
+
+# ── Local AI (LM Studio) ──
+# Usually no key needed, default is "local-key"
+LOCAL_AI_API_KEY=local-key

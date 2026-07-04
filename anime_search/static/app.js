@@ -502,6 +502,217 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeDetail();
+    if (e.key === "Escape") {
+      closeDetail();
+      closeSettings();
+    }
   });
+
+  // Settings panel
+  const settingsToggle = document.getElementById("settings-toggle");
+  if (settingsToggle) {
+    settingsToggle.addEventListener("click", openSettings);
+  }
+
+  const settingsSave = document.getElementById("settings-save");
+  if (settingsSave) {
+    settingsSave.addEventListener("click", saveSettings);
+  }
+
+  const settingsTest = document.getElementById("settings-test");
+  if (settingsTest) {
+    settingsTest.addEventListener("click", testConnection);
+  }
+
+  const settingsReset = document.getElementById("settings-reset");
+  if (settingsReset) {
+    settingsReset.addEventListener("click", resetDefaults);
+  }
+
+  // Provider card radio buttons
+  document.querySelectorAll(".provider-card input[type=radio]").forEach(radio => {
+    radio.addEventListener("change", () => {
+      document.querySelectorAll(".provider-card").forEach(c => c.classList.remove("active"));
+      radio.closest(".provider-card").classList.add("active");
+      toggleProviderSections();
+    });
+  });
+
+  loadSettingsIntoForm();
 });
+
+/* ── Settings ── */
+const SETTINGS_DEFAULTS = {
+  ai_provider: "local",
+  ai_api_key: "",
+  ai_base_url: "",
+  ai_model: "",
+  ai_temperature: 0.15,
+  ai_max_tokens: 4096,
+  ai_timeout_seconds: 120,
+  local_ai_base_url: "http://127.0.0.1:1234",
+  local_ai_api_key: "local-key",
+  local_ai_model: "google/gemma-4-e2b",
+  openrouter_api_key: "",
+  openrouter_base_url: "https://openrouter.ai/api",
+  openrouter_model: "google/gemma-4-31b-it:free",
+  agent_max_iterations: 10,
+  agent_max_tool_calls: 15,
+};
+
+function openSettings() {
+  const modal = document.getElementById("settings-modal");
+  if (modal) modal.style.display = "flex";
+}
+
+function closeSettings() {
+  const modal = document.getElementById("settings-modal");
+  if (modal) modal.style.display = "none";
+}
+
+function toggleProviderSections() {
+  const checked = document.querySelector(".provider-card input[type=radio]:checked");
+  const provider = checked ? checked.value : "local";
+  const localSection = document.getElementById("settings-local-section");
+  const openrouterSection = document.getElementById("settings-openrouter-section");
+  if (localSection) localSection.style.display = provider === "local" ? "block" : "none";
+  if (openrouterSection) openrouterSection.style.display = provider === "openrouter" ? "block" : "none";
+}
+
+function setProviderCard(provider) {
+  document.querySelectorAll(".provider-card").forEach(c => {
+    const radio = c.querySelector("input[type=radio]");
+    if (radio) {
+      radio.checked = radio.value === provider;
+      c.classList.toggle("active", radio.checked);
+    }
+  });
+  toggleProviderSections();
+}
+
+function setValue(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.value = value ?? "";
+}
+
+function loadSettingsIntoForm() {
+  // 1. Try localStorage first (instant)
+  const cached = localStorage.getItem("anime-search-settings");
+  if (cached) {
+    try {
+      applyConfig(JSON.parse(cached));
+    } catch (_) {}
+  }
+  // 2. Then fetch from server (authoritative) and update
+  fetch("/api/config")
+    .then(r => r.json())
+    .then(cfg => {
+      applyConfig(cfg);
+      localStorage.setItem("anime-search-settings", JSON.stringify(cfg));
+    })
+    .catch(() => {});
+}
+
+function applyConfig(cfg) {
+  setProviderCard(cfg.ai_provider || "local");
+  setValue("cfg-local-base-url", cfg.local_ai_base_url);
+  setValue("cfg-local-api-key", cfg.local_ai_api_key);
+  setValue("cfg-local-model", cfg.local_ai_model);
+  setValue("cfg-openrouter-api-key", cfg.openrouter_api_key);
+  setValue("cfg-openrouter-base-url", cfg.openrouter_base_url);
+  setValue("cfg-openrouter-model", cfg.openrouter_model);
+  setValue("cfg-ai-temperature", cfg.ai_temperature);
+  setValue("cfg-ai-max-tokens", cfg.ai_max_tokens);
+  setValue("cfg-ai-timeout", cfg.ai_timeout_seconds);
+  setValue("cfg-agent-max-iterations", cfg.agent_max_iterations);
+  setValue("cfg-agent-max-tool-calls", cfg.agent_max_tool_calls);
+  toggleProviderSections();
+}
+
+function collectConfig() {
+  const checked = document.querySelector(".provider-card input[type=radio]:checked");
+  return {
+    ai_provider: checked ? checked.value : "local",
+    ai_api_key: "",
+    ai_base_url: "",
+    ai_model: "",
+    ai_temperature: parseFloat(document.getElementById("cfg-ai-temperature")?.value || "0.15"),
+    ai_max_tokens: parseInt(document.getElementById("cfg-ai-max-tokens")?.value || "4096"),
+    ai_timeout_seconds: parseFloat(document.getElementById("cfg-ai-timeout")?.value || "120"),
+    local_ai_base_url: document.getElementById("cfg-local-base-url")?.value || "",
+    local_ai_api_key: document.getElementById("cfg-local-api-key")?.value || "",
+    local_ai_model: document.getElementById("cfg-local-model")?.value || "",
+    openrouter_api_key: document.getElementById("cfg-openrouter-api-key")?.value || "",
+    openrouter_base_url: document.getElementById("cfg-openrouter-base-url")?.value || "",
+    openrouter_model: document.getElementById("cfg-openrouter-model")?.value || "",
+    agent_max_iterations: parseInt(document.getElementById("cfg-agent-max-iterations")?.value || "10"),
+    agent_max_tool_calls: parseInt(document.getElementById("cfg-agent-max-tool-calls")?.value || "15"),
+  };
+}
+
+function showStatus(text, type) {
+  const status = document.getElementById("settings-status");
+  if (!status) return;
+  status.textContent = text;
+  status.className = "settings-status";
+  if (type) status.classList.add(type);
+}
+
+function saveSettings() {
+  const cfg = collectConfig();
+  showStatus("Saving...");
+
+  fetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(cfg),
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) {
+        showStatus(data.error, "error");
+      } else {
+        localStorage.setItem("anime-search-settings", JSON.stringify(cfg));
+        showStatus("Saved!", "ok");
+        setTimeout(() => showStatus(""), 2000);
+      }
+    })
+    .catch(err => showStatus("Failed: " + err.message, "error"));
+}
+
+function testConnection() {
+  const cfg = collectConfig();
+  showStatus("Testing...");
+
+  fetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(cfg),
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) {
+        showStatus(data.error, "error");
+        return;
+      }
+      localStorage.setItem("anime-search-settings", JSON.stringify(cfg));
+      return fetch("/api/test-connection", { method: "POST" });
+    })
+    .then(r => r ? r.json() : null)
+    .then(data => {
+      if (!data) return;
+      if (data.status === 200) {
+        const body = (data.body || "").replace(/\s+/g, " ").trim();
+        showStatus("OK: " + body.slice(0, 100), "ok");
+      } else {
+        showStatus("Error " + data.status + ": " + (data.body || data.error || "").slice(0, 160), "error");
+      }
+    })
+    .catch(err => showStatus("Failed: " + err.message, "error"));
+}
+
+function resetDefaults() {
+  localStorage.removeItem("anime-search-settings");
+  applyConfig(SETTINGS_DEFAULTS);
+  showStatus("Reset to defaults (save to apply)", "ok");
+}

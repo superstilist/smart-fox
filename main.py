@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 from flask import Flask, Response, jsonify, render_template, request
 
+from anime_search.config import load_settings, save_settings
 from anime_search.engine import AnimeSearchEngine, _get_task, cleanup_old_tasks
 
 log = logging.getLogger(__name__)
@@ -127,11 +128,34 @@ def create_app() -> Flask:
         template_folder="anime_search/templates",
         static_folder="anime_search/static",
     )
-    engine = AnimeSearchEngine()
+    settings = load_settings()
+    engine = AnimeSearchEngine(settings)
 
     @app.get("/")
     def index() -> str:
         return render_template("index.html", query="", profile=None, error=None, recommendation=None)
+
+    @app.get("/api/config")
+    def api_config_get() -> Any:
+        d = engine.settings.to_dict()
+        return jsonify(d)
+
+    @app.post("/api/config")
+    def api_config_post() -> Any:
+        nonlocal settings, engine
+        payload = request.get_json(silent=True) or {}
+        try:
+            new_settings = engine.settings.from_dict(payload)
+            validation_error = new_settings.validate_ai_provider()
+            if validation_error:
+                return jsonify({"error": validation_error}), 400
+            settings = new_settings
+            save_settings(settings)
+            engine = AnimeSearchEngine(settings)
+            return jsonify({"status": "ok", "config": engine.settings.to_dict()})
+        except Exception as exc:
+            log.error("Config update failed: %s", exc)
+            return jsonify({"error": str(exc)}), 400
 
     @app.post("/search")
     def search() -> str:
@@ -269,9 +293,32 @@ def create_app() -> Flask:
     def api_health() -> Any:
         return jsonify({
             "status": "ok",
+            "ai_provider": engine.settings.ai_provider,
+            "ai_model": engine.settings.effective_ai_model,
+            "ai_base_url": engine.settings.effective_ai_base_url,
             "lm_studio_url": engine.settings.local_ai_base_url,
             "model": engine.settings.local_ai_model,
         })
+
+    @app.post("/api/test-connection")
+    def api_test_connection() -> Any:
+        import asyncio as _aio
+        async def _test():
+            url = engine.settings.effective_ai_base_url.rstrip("/") + "/v1/chat/completions"
+            headers = engine.settings.openrouter_headers
+            payload = {
+                "model": engine.settings.effective_ai_model,
+                "messages": [{"role": "user", "content": "Say hello in one word."}],
+                "max_tokens": 10,
+            }
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=10)) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+                return resp.status_code, resp.text[:1000]
+        try:
+            status, body = _aio.run(_test())
+            return jsonify({"status": status, "body": body})
+        except Exception as exc:
+            return jsonify({"status": 0, "error": str(exc)}), 500
 
     @app.get("/api/tools")
     def api_tools() -> Any:
@@ -284,9 +331,10 @@ def create_app() -> Flask:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     app = create_app()
-    host = os.getenv("ANIME_SEARCH_WEB_HOST", "127.0.0.1")
-    port = int(os.getenv("ANIME_SEARCH_WEB_PORT", "5000"))
-    debug = os.getenv("ANIME_SEARCH_WEB_DEBUG", "0") == "1"
+    settings = load_settings()
+    host = settings.web_host
+    port = settings.web_port
+    debug = settings.web_debug
     app.run(host=host, port=port, debug=debug, use_reloader=debug)
 
 

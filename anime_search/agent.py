@@ -316,6 +316,19 @@ class AnimeAgent:
             log.info("Knowledge base too small (%d entries), auto-populating...", len(self.kb))
             self.kb = await auto_populate_kb()
 
+        validation_error = self.settings.validate_ai_provider()
+        if validation_error:
+            log.error("AI provider validation failed: %s", validation_error)
+            if on_commentary:
+                await on_commentary(f"## ERROR: {validation_error}")
+            return {
+                "engine": "agent",
+                "source_title": query,
+                "top_50": [],
+                "error": validation_error,
+                "raw_text": validation_error,
+            }
+
         if on_progress:
             await on_progress(0, [], "Pre-searching DuckDuckGo, Wikipedia, Fandom...")
         if on_commentary:
@@ -341,9 +354,7 @@ class AnimeAgent:
 
         base_url = self.settings.effective_ai_base_url.rstrip("/")
         url = f"{base_url}/v1/chat/completions"
-        headers: dict[str, str] = {}
-        if self.settings.local_ai_api_key and self.settings.local_ai_api_key != "local-key":
-            headers["Authorization"] = f"Bearer {self.settings.local_ai_api_key}"
+        headers = self.settings.openrouter_headers
 
         user_message = self._build_user_message(query, user_description, profile, web_results)
         messages: list[dict[str, Any]] = [
@@ -364,15 +375,22 @@ class AnimeAgent:
             payload = {
                 "model": self.settings.effective_ai_model,
                 "messages": messages,
-                "tools": TOOL_DEFINITIONS,
-                "tool_choice": "auto",
                 "temperature": self.settings.ai_temperature,
                 "max_tokens": self.settings.ai_max_tokens,
             }
+            if not self.settings.is_openrouter:
+                payload["tools"] = TOOL_DEFINITIONS
+                payload["tool_choice"] = "auto"
 
             try:
                 async with httpx.AsyncClient(timeout=self.settings.ai_http_timeout) as client:
                     response = await client.post(url, json=payload, headers=headers)
+                    if response.status_code != 200:
+                        error_body = response.text[:500]
+                        log.warning("Agent LLM call failed at iteration %d: HTTP %d - %s", iteration, response.status_code, error_body)
+                        if on_commentary:
+                            await on_commentary(f"## LLM call failed: HTTP {response.status_code} - {error_body[:200]}")
+                        break
                     response.raise_for_status()
                     response_data = response.json()
             except Exception as exc:

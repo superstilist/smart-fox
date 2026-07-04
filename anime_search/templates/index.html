@@ -24,6 +24,9 @@
               <span class="icon-moon">&#9790;</span>
               <span class="theme-label">Theme</span>
             </button>
+            <button class="settings-toggle" id="settings-toggle" type="button" title="Settings">
+              <span class="icon-gear">&#9881;</span>
+            </button>
           </div>
         </div>
         <form class="search-form" method="post" action="/search" data-loading-form>
@@ -257,6 +260,115 @@
           <span>Loading anime details...</span>
         </div>
         <div class="detail-content" id="detail-content" style="display:none;"></div>
+      </div>
+    </div>
+
+    <div class="settings-modal" id="settings-modal" style="display:none;">
+      <div class="settings-overlay" onclick="closeSettings()"></div>
+      <div class="settings-panel">
+        <button class="settings-close" onclick="closeSettings()">&times;</button>
+        <h2>Settings</h2>
+        <div class="settings-content">
+
+          <div class="settings-section provider-select-section">
+            <label for="cfg-ai-provider">AI Provider</label>
+            <div class="provider-cards">
+              <label class="provider-card active" data-provider="local">
+                <input type="radio" name="ai_provider" value="local" id="cfg-ai-provider" checked>
+                <div class="provider-card-inner">
+                  <div class="provider-icon">&#128421;</div>
+                  <strong>Local</strong>
+                  <span>LM Studio</span>
+                </div>
+              </label>
+              <label class="provider-card" data-provider="openrouter">
+                <input type="radio" name="ai_provider" value="openrouter">
+                <div class="provider-card-inner">
+                  <div class="provider-icon">&#9889;</div>
+                  <strong>OpenRouter</strong>
+                  <span>Cloud API</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-section provider-section" id="settings-local-section">
+            <h3>&#128421; Local AI (LM Studio)</h3>
+            <div class="settings-field">
+              <label for="cfg-local-base-url">URL</label>
+              <input type="text" id="cfg-local-base-url" placeholder="http://127.0.0.1:1234">
+              <p class="field-hint">LM Studio server address</p>
+            </div>
+            <div class="settings-row">
+              <div class="settings-field">
+                <label for="cfg-local-model">Model</label>
+                <input type="text" id="cfg-local-model" placeholder="google/gemma-4-e2b">
+              </div>
+              <div class="settings-field">
+                <label for="cfg-local-api-key">API Key</label>
+                <input type="password" id="cfg-local-api-key" placeholder="local-key">
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section provider-section" id="settings-openrouter-section" style="display:none;">
+            <h3>&#9889; OpenRouter</h3>
+            <div class="settings-field">
+              <label for="cfg-openrouter-api-key">API Key *</label>
+              <input type="password" id="cfg-openrouter-api-key" placeholder="sk-or-v1-...">
+              <p class="field-hint">Get yours at <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">openrouter.ai/keys</a></p>
+            </div>
+            <div class="settings-row">
+              <div class="settings-field grow">
+                <label for="cfg-openrouter-model">Model</label>
+                <input type="text" id="cfg-openrouter-model" placeholder="google/gemma-4-31b-it:free">
+              </div>
+              <div class="settings-field">
+                <label for="cfg-openrouter-base-url">API Base</label>
+                <input type="text" id="cfg-openrouter-base-url" placeholder="https://openrouter.ai/api">
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3>Parameters</h3>
+            <div class="settings-row">
+              <div class="settings-field">
+                <label for="cfg-ai-temperature">Temperature</label>
+                <input type="number" id="cfg-ai-temperature" min="0" max="2" step="0.05">
+              </div>
+              <div class="settings-field">
+                <label for="cfg-ai-max-tokens">Max Tokens</label>
+                <input type="number" id="cfg-ai-max-tokens" min="256" max="32768" step="256">
+              </div>
+              <div class="settings-field">
+                <label for="cfg-ai-timeout">Timeout (s)</label>
+                <input type="number" id="cfg-ai-timeout" min="10" max="600" step="10">
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3>Agent</h3>
+            <div class="settings-row">
+              <div class="settings-field">
+                <label for="cfg-agent-max-iterations">Max Iterations</label>
+                <input type="number" id="cfg-agent-max-iterations" min="1" max="50" step="1">
+              </div>
+              <div class="settings-field">
+                <label for="cfg-agent-max-tool-calls">Max Tool Calls</label>
+                <input type="number" id="cfg-agent-max-tool-calls" min="1" max="100" step="1">
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-actions">
+            <button id="settings-save" class="settings-btn primary">Save</button>
+            <button id="settings-test" class="settings-btn">Test Connection</button>
+            <button id="settings-reset" class="settings-btn danger">Reset Defaults</button>
+            <div class="settings-status" id="settings-status"></div>
+          </div>
+        </div>
       </div>
     </div>
 
