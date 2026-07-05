@@ -4,7 +4,9 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
+import xml.etree.ElementTree as ET
 from typing import Any
 
 import httpx
@@ -1177,7 +1179,6 @@ def _db_anidb_search(q: str) -> list[dict]:
     """Search anime on AniDB. Returns list of {id, title}."""
     xml_text = _db_anidb_request("anime", {"aid": q} if q.isdigit() else {})
     # AniDB search is limited; we parse the XML response
-    import xml.etree.ElementTree as ET
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
@@ -1202,7 +1203,6 @@ def _db_anidb_search(q: str) -> list[dict]:
 
 def _db_anidb_anime_by_id(aid: str) -> dict:
     """Get anime detail by AniDB ID."""
-    import xml.etree.ElementTree as ET
     xml_text = _db_anidb_request("anime", {"aid": aid})
     try:
         root = ET.fromstring(xml_text)
@@ -1237,7 +1237,6 @@ def _db_anidb_anime_by_id(aid: str) -> dict:
     synopsis = ""
     if description_el is not None and description_el.text:
         # Clean up AniDB description format
-        import re
         synopsis = re.sub(r'\[.*?\]', '', description_el.text).strip()[:500]
 
     # Parse related anime
