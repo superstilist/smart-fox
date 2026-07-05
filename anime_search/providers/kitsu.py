@@ -18,8 +18,6 @@ class KitsuProvider(AnimeProvider):
     async def fetch(self, query: str, content_filter: str = "sfw") -> dict[str, Any]:
         headers = {"Accept": "application/vnd.api+json"}
         params: dict[str, Any] = {"filter[text]": query, "page[limit]": 1}
-        if content_filter == "sfw":
-            params["filter[nsfw]"] = "false"
         response = await self.client.get(
             f"{self.settings.kitsu_base_url}/anime",
             params=params,

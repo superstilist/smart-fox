@@ -297,6 +297,9 @@ class AnimeAgent:
             "total_tokens": 0,
             "calls": 0,
         }
+        parallel = self.settings.local_ai_parallel_slots if self.settings.ai_provider == "local" else 1
+        self._llm_semaphore = asyncio.Semaphore(max(1, parallel))
+        self._parallel_slots = max(1, parallel)
 
     @classmethod
     def _check_cooldown(cls) -> float:
@@ -313,55 +316,53 @@ class AnimeAgent:
         return result
 
     async def _llm_call(self, payload: dict[str, Any], on_commentary: Any = None) -> dict[str, Any] | None:
-        cooldown = self._check_cooldown()
-        if cooldown > 0:
-            log.info("OpenRouter global cooldown: %.0fs remaining", cooldown)
-            if on_commentary:
-                await on_commentary(f"## OpenRouter cooldown {cooldown:.0f}s...")
-            await asyncio.sleep(cooldown)
+        async with self._llm_semaphore:
+            cooldown = self._check_cooldown()
+            if cooldown > 0:
+                log.info("OpenRouter global cooldown: %.0fs remaining", cooldown)
+                if on_commentary:
+                    await on_commentary(f"## OpenRouter cooldown {cooldown:.0f}s...")
+                await asyncio.sleep(cooldown)
 
-        models_to_try = [self._current_model] + [
-            m for m in self._fallback_models if m != self._current_model
-        ]
-        all_429 = True
-        async with httpx.AsyncClient(timeout=self.settings.ai_http_timeout) as client:
-            for model in models_to_try:
-                payload["model"] = model
-                try:
-                    response = await client.post(self._llm_url, json=payload, headers=self._llm_headers)
-                    if response.status_code == 429:
-                        wait = min(float(response.headers.get("Retry-After", "3")), 5)
-                        log.info("Rate limited on %s, waiting %.0fs", model, wait)
+            models_to_try = [self._current_model] + [
+                m for m in self._fallback_models if m != self._current_model
+            ]
+            all_429 = True
+            async with httpx.AsyncClient(timeout=self.settings.ai_http_timeout) as client:
+                for model in models_to_try:
+                    payload["model"] = model
+                    try:
+                        response = await client.post(self._llm_url, json=payload, headers=self._llm_headers)
+                        if response.status_code == 429:
+                            wait = min(float(response.headers.get("Retry-After", "3")), 5)
+                            log.info("Rate limited on %s, waiting %.0fs", model, wait)
+                            if on_commentary:
+                                await on_commentary(f"## Rate limited on {model}, waiting {wait:.0f}s...")
+                            await asyncio.sleep(wait)
+                            continue
+                        response.raise_for_status()
+                        self._current_model = model
+                        all_429 = False
+                        raw_data = response.json()
+                        usage = raw_data.get("usage", {})
+                        self._token_usage["prompt_tokens"] += usage.get("prompt_tokens", 0)
+                        self._token_usage["completion_tokens"] += usage.get("completion_tokens", 0)
+                        self._token_usage["total_tokens"] += usage.get("total_tokens", 0)
+                        self._token_usage["calls"] += 1
+                        return raw_data
+                    except httpx.HTTPStatusError:
+                        raise
+                    except Exception as exc:
+                        log.warning("LLM call failed on %s: %s", model, exc)
                         if on_commentary:
-                            await on_commentary(f"## Rate limited on {model}, waiting {wait:.0f}s...")
-                        await asyncio.sleep(wait)
+                            await on_commentary(f"## {model} failed: {exc}")
                         continue
-                    response.raise_for_status()
-                    self._current_model = model
-                    all_429 = False
-                    raw_data = response.json()
-                    usage = raw_data.get("usage", {})
-                    self._token_usage["prompt_tokens"] += usage.get("prompt_tokens", 0)
-                    self._token_usage["completion_tokens"] += usage.get("completion_tokens", 0)
-                    self._token_usage["total_tokens"] += usage.get("total_tokens", 0)
-                    self._token_usage["calls"] += 1
-                    return raw_data
-                except httpx.HTTPStatusError:
-                    raise
-                except Exception as exc:
-                    log.warning("LLM call failed on %s: %s", model, exc)
-                    if on_commentary:
-                        await on_commentary(f"## {model} failed: {exc}")
-                    continue
-                finally:
-                    if on_commentary and model != models_to_try[-1]:
-                        pass
-        if all_429:
-            self._set_cooldown(25.0)
-            log.warning("All OpenRouter models rate-limited, global cooldown 25s")
-            if on_commentary:
-                await on_commentary("## All models rate limited, cooling down 25s...")
-        return None
+            if all_429:
+                self._set_cooldown(25.0)
+                log.warning("All OpenRouter models rate-limited, global cooldown 25s")
+                if on_commentary:
+                    await on_commentary("## All models rate limited, cooling down 25s...")
+            return None
 
     async def research(
         self,
@@ -482,45 +483,77 @@ class AnimeAgent:
 
             messages.append(message)
 
-            for tc in tool_calls:
-                func = tc.get("function", {})
-                tool_name = func.get("name", "")
-                try:
-                    args = json.loads(func.get("arguments", "{}"))
-                except json.JSONDecodeError:
-                    args = {}
-
+            if self._parallel_slots > 1 and len(tool_calls) > 1:
                 if on_commentary:
-                    await on_commentary(f"## Using tool: {tool_name}({json.dumps(args)[:100]})")
-                if on_tool_call:
-                    await on_tool_call(tool_name, args, "running")
+                    await on_commentary(f"## Running {len(tool_calls)} tools in parallel...")
 
-                result = await self.execute_kb_tool(tool_name, args)
-                total_tool_calls += 1
-                self.tool_calls_log.append({
-                    "tool": tool_name,
-                    "arguments": args,
-                    "result": result,
-                    "timestamp": time.time(),
-                })
+                async def _run_one_tool(tc):
+                    func = tc.get("function", {})
+                    t_name = func.get("name", "")
+                    try:
+                        t_args = json.loads(func.get("arguments", "{}"))
+                    except json.JSONDecodeError:
+                        t_args = {}
+                    if on_commentary:
+                        await on_commentary(f"## Using tool: {t_name}({json.dumps(t_args)[:100]})")
+                    if on_tool_call:
+                        await on_tool_call(t_name, t_args, "running")
+                    t_result = await self.execute_kb_tool(t_name, t_args)
+                    if on_tool_call:
+                        await on_tool_call(t_name, t_args, "done", t_result)
+                    return tc, t_name, t_args, t_result
 
-                if on_commentary:
-                    result_summary = str(result)[:100]
-                    await on_commentary(f"## Tool {tool_name} returned: {result_summary}")
-                if on_tool_call:
-                    await on_tool_call(tool_name, args, "done", result)
-
-                tool_result_text = json.dumps(result, ensure_ascii=False)
-                if len(tool_result_text) > 2000:
-                    tool_result_text = tool_result_text[:2000] + "..."
-
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.get("id", ""),
-                    "content": tool_result_text,
-                })
-
-                await asyncio.sleep(self.settings.agent_tool_delay)
+                results = await asyncio.gather(*[_run_one_tool(tc) for tc in tool_calls], return_exceptions=True)
+                for r in results:
+                    if isinstance(r, Exception):
+                        continue
+                    tc, t_name, t_args, t_result = r
+                    total_tool_calls += 1
+                    self.tool_calls_log.append({
+                        "tool": t_name, "arguments": t_args,
+                        "result": t_result, "timestamp": time.time(),
+                    })
+                    if on_commentary:
+                        await on_commentary(f"## Tool {t_name} returned: {str(t_result)[:100]}")
+                    tool_result_text = json.dumps(t_result, ensure_ascii=False)
+                    if len(tool_result_text) > 2000:
+                        tool_result_text = tool_result_text[:2000] + "..."
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.get("id", ""),
+                        "content": tool_result_text,
+                    })
+            else:
+                for tc in tool_calls:
+                    func = tc.get("function", {})
+                    tool_name = func.get("name", "")
+                    try:
+                        args = json.loads(func.get("arguments", "{}"))
+                    except json.JSONDecodeError:
+                        args = {}
+                    if on_commentary:
+                        await on_commentary(f"## Using tool: {tool_name}({json.dumps(args)[:100]})")
+                    if on_tool_call:
+                        await on_tool_call(tool_name, args, "running")
+                    result = await self.execute_kb_tool(tool_name, args)
+                    total_tool_calls += 1
+                    self.tool_calls_log.append({
+                        "tool": tool_name, "arguments": args,
+                        "result": result, "timestamp": time.time(),
+                    })
+                    if on_commentary:
+                        await on_commentary(f"## Tool {tool_name} returned: {str(result)[:100]}")
+                    if on_tool_call:
+                        await on_tool_call(tool_name, args, "done", result)
+                    tool_result_text = json.dumps(result, ensure_ascii=False)
+                    if len(tool_result_text) > 2000:
+                        tool_result_text = tool_result_text[:2000] + "..."
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.get("id", ""),
+                        "content": tool_result_text,
+                    })
+                    await asyncio.sleep(self.settings.agent_tool_delay)
 
         # If we already have tool results and LLM is completely dead,
         # skip the extra LLM call and build result from tool data directly

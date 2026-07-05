@@ -13,6 +13,7 @@
   "ai_temperature": 0.15,
   "local_ai_base_url": "http://127.0.0.1:1234",
   "local_ai_model": "google/gemma-4-e2b",
+  "local_ai_parallel_slots": 2,
   "openrouter_model": "nvidia/nemotron-3-super-120b-a12b:free",
   "openrouter_fallback_models": "google/gemma-4-26b-a4b-it:free,meta-llama/llama-3.3-70b-instruct:free,qwen/qwen3-next-80b-a3b-instruct:free,openai/gpt-oss-120b:free",
   "agent_max_iterations": 10,

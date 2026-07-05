@@ -72,6 +72,8 @@ def choose_media(results: list[SourceResult]) -> dict[str, Any]:
     for result in sorted(results, key=lambda r: r.confidence, reverse=True):
         for key, value in (result.normalized.get("media") or {}).items():
             if value and key not in media:
+                if key in ("poster", "banner") and isinstance(value, str):
+                    value = value.replace("http://", "https://")
                 media[key] = value
     return media
 

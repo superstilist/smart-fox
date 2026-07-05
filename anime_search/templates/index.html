@@ -4,68 +4,88 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="AI-powered anime discovery engine. Search by title or describe what you want — AI finds similar anime from AniList, Jikan, and Kitsu databases.">
-    <title>AI Anime Search</title>
+    <title>Smart Fox — AI Anime Search</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet" />
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
   </head>
   <body>
-    <header class="md-top-app-bar">
-      <div class="md-top-app-bar-inner">
+    <header class="app-bar">
+      <div class="app-bar-inner">
         <div class="brand">
-          <span class="material-symbols-rounded md-primary-icon">smart_toy</span>
-          <span class="md-typescale-title-large">AI Anime Search</span>
+          <div class="brand-icon">
+            <span class="material-symbols-rounded">smart_toy</span>
+          </div>
+          <span class="brand-title">Smart Fox</span>
         </div>
-        <div class="actions">
-          <button class="md-icon-btn theme-toggle" id="theme-toggle" type="button" title="Toggle theme">
+        <nav class="app-nav" aria-label="Main navigation">
+          <button class="nav-btn active" id="nav-search" type="button" data-action="show-view" data-view="search" aria-label="Search view">
+            <span class="material-symbols-rounded">search</span>
+            <span class="nav-label">Search</span>
+          </button>
+          <button class="nav-btn" id="nav-library" type="button" data-action="show-view" data-view="library" aria-label="Library view">
+            <span class="material-symbols-rounded">collections_bookmark</span>
+            <span class="nav-label">Library</span>
+            <span class="nav-badge" id="library-badge" style="display:none;">0</span>
+          </button>
+          <button class="nav-btn" id="nav-database" type="button" data-action="show-view" data-view="database" aria-label="Database view">
+            <span class="material-symbols-rounded">database</span>
+            <span class="nav-label">Database</span>
+          </button>
+        </nav>
+        <div class="app-actions">
+          <button class="icon-btn theme-toggle" id="theme-toggle" type="button" title="Toggle theme" aria-label="Toggle theme">
             <span class="material-symbols-rounded icon-sun" style="display:none;">light_mode</span>
             <span class="material-symbols-rounded icon-moon">dark_mode</span>
           </button>
-          <button class="md-icon-btn" id="settings-toggle" type="button" title="Settings">
+          <button class="icon-btn" id="settings-toggle" type="button" title="Settings" aria-label="Open settings">
             <span class="material-symbols-rounded">settings</span>
           </button>
         </div>
       </div>
     </header>
 
-    <main class="md-container">
-      <section class="search-section">
-        <div class="md-card md-card-elevated search-card">
-          <div class="search-card-header">
-            <h2 class="md-typescale-headline-small">Find your next anime</h2>
-            <p class="md-typescale-body-medium md-color-muted">Search by title or describe what you want — AI will find it.</p>
-          </div>
+    <main class="container">
+      <section class="search-view view-transition" id="search-view">
+        <div class="search-hero">
+          <h1 class="hero-title">Find your next anime</h1>
+          <p class="hero-subtitle">Search by title or describe what you want — AI finds the perfect match</p>
+        </div>
+        <div class="card card-elevated search-card">
           <form class="search-form" method="post" action="/search" data-loading-form>
-            <div class="md-text-field md-filled">
-              <label for="query">Anime title</label>
-              <input id="query" name="query" value="{{ query }}" placeholder="Cowboy Bebop" autocomplete="off">
+            <div class="field-row">
+              <div class="field field-filled flex-grow">
+                <label for="query">Anime title</label>
+                <input id="query" name="query" value="{{ query }}" placeholder="Cowboy Bebop" autocomplete="off">
+              </div>
             </div>
-            
-            <div class="md-text-field md-filled">
+            <div class="field field-filled">
               <label for="description">Description (AI Search)</label>
               <textarea id="description" name="description" rows="2" placeholder="A space western with jazz music, cool bounty hunters...">{{ description if description else "" }}</textarea>
             </div>
-            
             <div class="search-filters">
-              <div class="md-text-field md-filled select-field">
+              <div class="field field-filled select-field">
                 <label for="content_filter">Content Filter</label>
                 <select id="content_filter" name="content_filter">
                   <option value="sfw" {{ 'selected' if content_filter == 'sfw' else '' }}>SFW Only</option>
                   <option value="all" {{ 'selected' if content_filter == 'all' else '' }}>All (SFW + NSFW)</option>
                   <option value="nsfw" {{ 'selected' if content_filter == 'nsfw' else '' }}>NSFW Only</option>
                 </select>
-                <span class="material-symbols-rounded dropdown-icon">arrow_drop_down</span>
               </div>
-              <div class="md-text-field md-filled flex-grow">
-                <label for="negative_prompt">Exclude tags (comma-separated)</label>
+              <div class="field field-filled flex-grow">
+                <label for="negative_prompt">Exclude tags</label>
                 <input id="negative_prompt" name="negative_prompt" value="{{ negative_prompt if negative_prompt else '' }}" placeholder="harem, mecha" autocomplete="off">
               </div>
+              <label class="toggle-field" title="Enable AI-powered recommendations">
+                <input type="checkbox" id="ai-toggle" checked>
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                <span class="toggle-label">AI Search</span>
+              </label>
             </div>
-            
             <div class="search-actions">
-              <button class="md-btn md-btn-filled" type="submit">
+              <button class="btn btn-filled" type="submit" id="search-submit">
                 <span class="material-symbols-rounded">search</span>
                 Search
               </button>
@@ -75,10 +95,10 @@
       </section>
 
       {% if error %}
-        <section class="md-alert md-alert-error">
+        <div class="alert alert-error">
           <span class="material-symbols-rounded">error</span>
           <span>{{ error }}</span>
-        </section>
+        </div>
       {% endif %}
 
       {% if profile %}
@@ -92,9 +112,9 @@
           
           <div class="profile-grid">
             <aside class="profile-sidebar">
-              <div class="poster-container md-elevation-3">
+              <div class="poster-wrap elevation-3">
                 {% if profile.media.poster %}
-                  <img src="{{ profile.media.poster }}" alt="{{ profile.titles.all[0] if profile.titles.all else query }} poster" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                  <img class="poster-img" src="{{ profile.media.poster }}" alt="{{ profile.titles.all[0] if profile.titles.all else query }} poster" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                   <div class="poster-placeholder" style="display: none;">
                     <span class="material-symbols-rounded">image_not_supported</span>
                   </div>
@@ -105,7 +125,12 @@
                 {% endif %}
               </div>
 
-              <div class="md-card md-card-filled stats-card">
+              <button class="btn btn-outlined full-width" data-action="add-from-profile" id="profile-add-btn">
+                <span class="material-symbols-rounded">add</span>
+                Add to Library
+              </button>
+
+              <div class="card card-filled stats-card">
                 <div class="stats-grid">
                   {% for source, status in profile.provider_status.items() %}
                     <div class="stat-item {{ 'status-ok' if status.ok else 'status-fail' }}">
@@ -125,7 +150,7 @@
               </div>
 
               {% if profile.media.trailer %}
-                <a class="md-btn md-btn-outlined full-width" href="{{ profile.media.trailer }}" target="_blank" rel="noreferrer">
+                <a class="btn btn-outlined full-width" href="{{ profile.media.trailer }}" target="_blank" rel="noreferrer">
                   <span class="material-symbols-rounded">play_circle</span>
                   Watch Trailer
                 </a>
@@ -134,25 +159,25 @@
             
             <div class="profile-main">
               <div class="title-section">
-                <h1 class="md-typescale-display-small">{{ profile.titles.all[0] if profile.titles.all else query }}</h1>
+                <h1 class="title-display">{{ profile.titles.all[0] if profile.titles.all else query }}</h1>
                 {% if profile.titles.romaji and profile.titles.romaji[0] != profile.titles.all[0] %}
-                  <h2 class="md-typescale-title-medium md-color-muted">{{ profile.titles.romaji[0] }}</h2>
+                  <h2 class="title-sub muted">{{ profile.titles.romaji[0] }}</h2>
                 {% endif %}
               </div>
               
-              <p class="md-typescale-body-large synopsis">{{ profile.description.summary or "No description found." }}</p>
+              <p class="synopsis">{{ profile.description.summary or "No description found." }}</p>
               
-              <div class="chips-container">
+              <div class="chips-wrap">
                 {% for genre in profile.genres[:12] %}
-                  <span class="md-chip md-chip-primary">{{ genre }}</span>
+                  <span class="chip chip-accent">{{ genre }}</span>
                 {% endfor %}
                 {% for theme in profile.themes[:12] %}
-                  <span class="md-chip md-chip-secondary">{{ theme }}</span>
+                  <span class="chip chip-soft">{{ theme }}</span>
                 {% endfor %}
               </div>
 
-              <div class="md-card md-card-outlined details-card">
-                <h3 class="md-typescale-title-large">Details</h3>
+              <div class="card card-outlined details-card">
+                <h3 class="card-title"><span class="material-symbols-rounded">info</span> Details</h3>
                 <div class="info-grid">
                   {% if profile.release %}
                     {% for source, release in profile.release.items() %}
@@ -189,8 +214,8 @@
               </div>
 
               {% if profile.characters %}
-                <div class="md-card md-card-filled characters-card">
-                  <h3 class="md-typescale-title-large">Characters</h3>
+                <div class="card card-filled characters-card">
+                  <h3 class="card-title">Characters</h3>
                   <div class="character-grid">
                     {% for character in profile.characters[:24] %}
                       <div class="character-item">
@@ -203,8 +228,8 @@
                           {% endif %}
                         </div>
                         <div class="character-info">
-                          <span class="md-typescale-label-large">{{ character.name }}</span>
-                          <span class="md-typescale-body-small md-color-muted">{{ character.role or "Character" }}</span>
+                          <span class="character-name">{{ character.name }}</span>
+                          <span class="character-role muted">{{ character.role or "Character" }}</span>
                         </div>
                       </div>
                     {% endfor %}
@@ -212,160 +237,261 @@
                 </div>
               {% endif %}
 
-              <div class="md-card md-card-filled wide" id="ai-status-panel" style="display:none;">
-                <h3 class="md-typescale-title-large">AI Search Status</h3>
+              <div class="card card-filled" id="ai-status-panel" style="display:none;">
+                <h3 class="card-title">AI Search Status</h3>
                 <div class="ai-status-box">
                   <div class="status-header">
-                    <div class="status-text md-typescale-body-medium" id="ai-status-text">Initializing...</div>
-                    <div class="status-count md-typescale-label-large" id="ai-status-count">0 found</div>
+                    <div class="status-text" id="ai-status-text">Initializing...</div>
+                    <div class="status-count" id="ai-status-count">0 found</div>
                   </div>
-                  <div class="md-linear-progress">
-                    <div class="md-linear-progress-bar" id="ai-status-bar" style="width: 0%"></div>
+                  <div class="progress-track">
+                    <div class="progress-bar" id="ai-status-bar" style="width: 0%"></div>
                   </div>
-                  <div class="status-detail md-typescale-body-small md-color-muted" id="ai-status-detail"></div>
-                  <button class="md-btn md-btn-text" id="cancel-search-btn" type="button" style="display:none;">Cancel</button>
+                  <div class="status-detail muted" id="ai-status-detail"></div>
+                  <button class="btn btn-text" id="cancel-search-btn" type="button" style="display:none;">Cancel</button>
                 </div>
               </div>
 
-              <div class="md-card md-card-elevated wide" id="ai-recommendations">
+              <div class="card card-elevated" id="ai-recommendations">
                 <div class="rec-header">
-                  <h3 class="md-typescale-title-large" id="ai-rec-title">AI Recommendations <span id="rec-total-count" class="rec-count md-color-muted"></span></h3>
-                  <button class="md-icon-btn" onclick="shareRecommendations()" title="Share">
-                    <span class="material-symbols-rounded">share</span>
-                  </button>
+                  <h3 class="card-title" id="ai-rec-title">AI Recommendations <span id="rec-total-count" class="muted"></span></h3>
+                  <div class="rec-header-actions">
+                    <button class="icon-btn" data-action="share-recs" title="Share" aria-label="Share recommendations">
+                      <span class="material-symbols-rounded">share</span>
+                    </button>
+                  </div>
                 </div>
-                <p class="md-typescale-body-small md-color-muted rec-hint">Click any card to see full anime details</p>
-                <div class="ai-rec-grid" id="rec-grid" data-source-title="{{ recommendation.source_title if recommendation else query }}">
+                <p class="rec-hint muted">Click any card to see full details</p>
+                <div class="rec-grid" id="rec-grid" data-source-title="{{ recommendation.source_title if recommendation else query }}">
                 </div>
                 {% if recommendation %}
-                  <details class="md-details">
+                  <details class="json-details">
                     <summary>Recommendation JSON</summary>
                     <pre>{{ recommendation_json }}</pre>
                   </details>
                 {% endif %}
               </div>
-
             </div>
           </div>
         </section>
       {% endif %}
+
+      <section class="library-view" id="library-view" style="display:none;">
+        <div class="search-hero">
+          <h1 class="hero-title">My Library</h1>
+          <p class="hero-subtitle">Track and manage your anime collection</p>
+        </div>
+        <div class="library-controls">
+          <div class="library-stats" id="library-stats"></div>
+          <div class="library-toolbar">
+            <div class="library-filters">
+              <button class="chip chip-accent active" data-status="" data-action="filter-library">All</button>
+              <button class="chip chip-soft" data-status="watching" data-action="filter-library">Watching</button>
+              <button class="chip chip-soft" data-status="completed" data-action="filter-library">Completed</button>
+              <button class="chip chip-soft" data-status="plan_to_watch" data-action="filter-library">Plan to Watch</button>
+              <button class="chip chip-soft" data-status="on_hold" data-action="filter-library">On Hold</button>
+              <button class="chip chip-soft" data-status="dropped" data-action="filter-library">Dropped</button>
+            </div>
+            <div class="library-actions">
+              <div class="field field-filled library-search-field">
+                <label for="library-search">Search library</label>
+                <input id="library-search" type="text" placeholder="Search..." autocomplete="off">
+              </div>
+              <div class="field field-filled library-sort-field">
+                <label for="library-sort">Sort by</label>
+                <select id="library-sort">
+                  <option value="added_at">Date Added</option>
+                  <option value="updated_at">Last Updated</option>
+                  <option value="title">Title</option>
+                  <option value="rating">My Rating</option>
+                  <option value="score">MAL Score</option>
+                  <option value="progress">Progress</option>
+                  <option value="status">Status</option>
+                </select>
+              </div>
+              <button class="sort-dir-btn desc" id="sort-dir-btn" type="button" title="Toggle sort direction" aria-label="Toggle sort direction">
+                <span class="material-symbols-rounded">sort</span>
+              </button>
+              <button class="btn btn-outlined btn-small" data-action="export-library" title="Export library">
+                <span class="material-symbols-rounded">download</span> Export
+              </button>
+              <button class="btn btn-outlined btn-small" data-action="open-import" title="Import library">
+                <span class="material-symbols-rounded">upload</span> Import
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="library-grid" id="library-grid">
+          <div class="empty-state" id="library-empty">
+            <span class="material-symbols-rounded">collections_bookmark</span>
+            <p>Your library is empty</p>
+            <span class="muted">Search for anime and add them to your library</span>
+          </div>
+        </div>
+        <div id="sub-page-container" style="display:none;"></div>
+      </section>
+
+      <section class="database-view view-transition" id="database-view" style="display:none;">
+        <div class="search-hero">
+          <h1 class="hero-title">Database</h1>
+          <p class="hero-subtitle">Browse anime, manga, studios, and characters</p>
+        </div>
+        <div class="db-tabs">
+          <button class="db-tab active" data-db-tab="anime" data-action="db-tab">
+            <span class="material-symbols-rounded">movie</span> Anime
+          </button>
+          <button class="db-tab" data-db-tab="manga" data-action="db-tab">
+            <span class="material-symbols-rounded">menu_book</span> Manga
+          </button>
+          <button class="db-tab" data-db-tab="studios" data-action="db-tab">
+            <span class="material-symbols-rounded">business</span> Studios
+          </button>
+          <button class="db-tab" data-db-tab="characters" data-action="db-tab">
+            <span class="material-symbols-rounded">person</span> Characters
+          </button>
+        </div>
+        <div class="db-source-select">
+          <select id="db-source" aria-label="Data source">
+            <option value="anilist">AniList</option>
+            <option value="jikan">Jikan (MAL)</option>
+            <option value="kitsu">Kitsu</option>
+            <option value="anidb">AniDB</option>
+          </select>
+        </div>
+        <div class="db-search-bar">
+          <div class="field field-filled">
+            <label for="db-search-input">Search</label>
+            <input id="db-search-input" type="text" placeholder="Search anime, manga, studios, characters..." autocomplete="off">
+          </div>
+          <button class="btn btn-accent" id="db-search-btn" type="button" data-action="db-search">
+            <span class="material-symbols-rounded">search</span> Search
+          </button>
+        </div>
+        <div class="db-grid" id="db-grid"></div>
+        <div class="db-pagination" id="db-pagination"></div>
+        <div id="db-detail-page" style="display:none;"></div>
+      </section>
     </main>
 
-    <div class="md-dialog-scrim" id="detail-modal" style="display:none;">
-      <div class="md-dialog" role="dialog" aria-modal="true">
-        <div class="md-dialog-header">
-          <h2 class="md-typescale-title-large">Anime Details</h2>
-          <button class="md-icon-btn" onclick="closeDetail()">
+    <div class="dialog-scrim" id="detail-modal" style="display:none;">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="detail-modal-title">
+        <div class="dialog-header">
+          <h2 class="card-title" id="detail-modal-title">Anime Details</h2>
+          <button class="icon-btn" data-action="close-detail" aria-label="Close dialog">
             <span class="material-symbols-rounded">close</span>
           </button>
         </div>
-        <div class="md-dialog-content">
+        <div class="dialog-content">
           <div class="detail-loading" id="detail-loading">
-            <div class="md-circular-progress"></div>
-            <span class="md-typescale-body-medium">Loading details...</span>
+            <div class="circular-progress"></div>
+            <span class="muted">Loading details...</span>
           </div>
           <div id="detail-content" style="display:none;"></div>
         </div>
       </div>
     </div>
 
-    <div class="md-dialog-scrim" id="settings-modal" style="display:none;">
-      <div class="md-dialog md-dialog-large" role="dialog" aria-modal="true">
-        <div class="md-dialog-header">
-          <h2 class="md-typescale-title-large">Settings</h2>
-          <button class="md-icon-btn" onclick="closeSettings()">
+    <div class="dialog-scrim" id="settings-modal" style="display:none;">
+      <div class="dialog dialog-large" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+        <div class="dialog-header">
+          <h2 class="card-title" id="settings-modal-title">Settings</h2>
+          <button class="icon-btn" data-action="close-settings" aria-label="Close dialog">
             <span class="material-symbols-rounded">close</span>
           </button>
         </div>
-        <div class="md-dialog-content">
+        <div class="dialog-content">
           <div class="settings-section">
-            <h3 class="md-typescale-title-medium">AI Provider</h3>
+            <h3 class="section-title">AI Provider</h3>
             <div class="provider-cards">
               <label class="provider-card active" data-provider="local">
                 <input type="radio" name="ai_provider" value="local" id="cfg-ai-provider" checked>
                 <div class="provider-card-inner">
-                  <span class="material-symbols-rounded md-icon-large">dns</span>
+                  <span class="material-symbols-rounded">dns</span>
                   <strong>Local</strong>
-                  <span class="md-typescale-body-small">LM Studio</span>
+                  <span class="muted">LM Studio</span>
                 </div>
               </label>
               <label class="provider-card" data-provider="openrouter">
                 <input type="radio" name="ai_provider" value="openrouter">
                 <div class="provider-card-inner">
-                  <span class="material-symbols-rounded md-icon-large">cloud</span>
+                  <span class="material-symbols-rounded">cloud</span>
                   <strong>OpenRouter</strong>
-                  <span class="md-typescale-body-small">Cloud API</span>
+                  <span class="muted">Cloud API</span>
                 </div>
               </label>
             </div>
           </div>
 
           <div class="settings-section" id="settings-local-section">
-            <h3 class="md-typescale-title-medium"><span class="material-symbols-rounded">dns</span> Local AI (LM Studio)</h3>
-            <div class="md-text-field md-outlined">
+            <h3 class="section-title"><span class="material-symbols-rounded">dns</span> Local AI (LM Studio)</h3>
+            <div class="field field-outlined">
               <label for="cfg-local-base-url">URL (LM Studio server)</label>
               <input type="text" id="cfg-local-base-url" placeholder="http://127.0.0.1:1234">
             </div>
-            <div class="settings-row">
-              <div class="md-text-field md-outlined">
+            <div class="field-row">
+              <div class="field field-outlined">
                 <label for="cfg-local-model">Model</label>
                 <input type="text" id="cfg-local-model" placeholder="google/gemma-4-e2b">
               </div>
-              <div class="md-text-field md-outlined">
+              <div class="field field-outlined">
                 <label for="cfg-local-api-key">API Key</label>
                 <input type="password" id="cfg-local-api-key" placeholder="local-key">
+              </div>
+              <div class="field field-outlined">
+                <label for="cfg-local-parallel">Parallel Slots</label>
+                <input type="number" id="cfg-local-parallel" min="1" max="8" step="1">
               </div>
             </div>
           </div>
 
           <div class="settings-section" id="settings-openrouter-section" style="display:none;">
-            <h3 class="md-typescale-title-medium"><span class="material-symbols-rounded">cloud</span> OpenRouter</h3>
-            <div class="md-text-field md-outlined">
+            <h3 class="section-title"><span class="material-symbols-rounded">cloud</span> OpenRouter</h3>
+            <div class="field field-outlined">
               <label for="cfg-openrouter-api-key">API Key *</label>
               <input type="password" id="cfg-openrouter-api-key" placeholder="sk-or-v1-...">
             </div>
-            <div class="settings-row">
-              <div class="md-text-field md-outlined flex-grow">
+            <div class="field-row">
+              <div class="field field-outlined flex-grow">
                 <label for="cfg-openrouter-model">Model</label>
                 <input type="text" id="cfg-openrouter-model" placeholder="google/gemma-4-31b-it:free">
               </div>
-              <div class="md-text-field md-outlined">
+              <div class="field field-outlined">
                 <label for="cfg-openrouter-base-url">API Base</label>
                 <input type="text" id="cfg-openrouter-base-url" placeholder="https://openrouter.ai/api">
               </div>
             </div>
-            <div class="md-text-field md-outlined">
+            <div class="field field-outlined">
               <label for="cfg-openrouter-fallback">Fallback Models</label>
               <input type="text" id="cfg-openrouter-fallback" placeholder="google/gemma-4-26b-a4b-it:free, meta-llama/llama-3.3-70b-instruct:free">
             </div>
           </div>
 
           <div class="settings-section" id="settings-model-status-section" style="display:none;">
-            <div class="model-status-header">
-              <h3 class="md-typescale-title-medium"><span class="material-symbols-rounded">build</span> Model Status</h3>
-              <button id="settings-refresh-models" class="md-btn md-btn-outlined md-btn-small" type="button">Refresh</button>
+            <div class="section-header">
+              <h3 class="section-title"><span class="material-symbols-rounded">build</span> Model Status</h3>
+              <button id="settings-refresh-models" class="btn btn-outlined btn-small" type="button">Refresh</button>
             </div>
             <div class="model-status-grid" id="model-status-grid">
-              <div class="model-status-loading">Click Refresh to check model status...</div>
+              <div class="muted center">Click Refresh to check model status...</div>
             </div>
           </div>
 
           <div class="settings-section">
-            <h3 class="md-typescale-title-medium">Parameters</h3>
-            <div class="settings-row">
-              <div class="md-text-field md-outlined">
+            <h3 class="section-title">Parameters</h3>
+            <div class="field-row">
+              <div class="field field-outlined">
                 <label for="cfg-ai-temperature">Temperature</label>
                 <input type="number" id="cfg-ai-temperature" min="0" max="2" step="0.05">
               </div>
-              <div class="md-text-field md-outlined">
+              <div class="field field-outlined">
                 <label for="cfg-ai-max-tokens">Max Tokens</label>
                 <input type="number" id="cfg-ai-max-tokens" min="256" max="32768" step="256">
               </div>
-              <div class="md-text-field md-outlined">
+              <div class="field field-outlined">
                 <label for="cfg-ai-timeout">Timeout (s)</label>
                 <input type="number" id="cfg-ai-timeout" min="10" max="600" step="10">
               </div>
-              <div class="md-text-field md-outlined">
+              <div class="field field-outlined">
                 <label for="cfg-token-budget">Token Budget</label>
                 <input type="number" id="cfg-token-budget" min="1000" step="1000">
               </div>
@@ -373,45 +499,137 @@
           </div>
 
           <div class="settings-section" id="settings-token-section">
-            <h3 class="md-typescale-title-medium"><span class="material-symbols-rounded">monitoring</span> Token Economy</h3>
-            <div class="token-usage-bar">
-              <div class="token-usage-info">
-                <span id="token-usage-text" class="md-typescale-body-small">Tokens: loading...</span>
-                <span id="token-usage-pct" class="md-typescale-body-small token-usage-pct"></span>
+            <h3 class="section-title"><span class="material-symbols-rounded">monitoring</span> Token Economy</h3>
+            <div class="token-bar">
+              <div class="token-info">
+                <span id="token-usage-text" class="muted">Tokens: loading...</span>
+                <span id="token-usage-pct" class="accent-text"></span>
               </div>
-              <div class="token-usage-track">
-                <div id="token-usage-fill" class="token-usage-fill"></div>
+              <div class="progress-track">
+                <div id="token-usage-fill" class="progress-bar token-fill"></div>
+              </div>
+            </div>
+            <div class="token-history" id="token-history" style="margin-top:12px;">
+              <div class="token-history-item">
+                <span class="token-history-label">Prompt</span>
+                <span class="token-history-value" id="token-prompt">0</span>
+              </div>
+              <div class="token-history-item">
+                <span class="token-history-label">Completion</span>
+                <span class="token-history-value" id="token-completion">0</span>
+              </div>
+              <div class="token-history-item">
+                <span class="token-history-label">Total</span>
+                <span class="token-history-value" id="token-total">0</span>
+              </div>
+              <div class="token-history-item">
+                <span class="token-history-label">Calls</span>
+                <span class="token-history-value" id="token-calls">0</span>
               </div>
             </div>
           </div>
 
           <div class="settings-section">
-            <h3 class="md-typescale-title-medium">Agent</h3>
-            <div class="settings-row">
-              <div class="md-text-field md-outlined">
+            <h3 class="section-title">Agent</h3>
+            <div class="field-row">
+              <div class="field field-outlined">
                 <label for="cfg-agent-max-iterations">Max Iterations</label>
                 <input type="number" id="cfg-agent-max-iterations" min="1" max="50" step="1">
               </div>
-              <div class="md-text-field md-outlined">
+              <div class="field field-outlined">
                 <label for="cfg-agent-max-tool-calls">Max Tool Calls</label>
                 <input type="number" id="cfg-agent-max-tool-calls" min="1" max="100" step="1">
               </div>
             </div>
           </div>
         </div>
-        <div class="md-dialog-actions">
-          <div class="settings-status md-typescale-body-small" id="settings-status"></div>
-          <button id="settings-reset" class="md-btn md-btn-text md-color-error">Reset</button>
-          <button id="settings-test" class="md-btn md-btn-outlined">Test Connection</button>
+        <div class="dialog-actions">
+          <div class="settings-status muted" id="settings-status"></div>
+          <button id="settings-reset" class="btn btn-text color-error">Reset</button>
+          <button id="settings-test" class="btn btn-outlined">Test Connection</button>
         </div>
       </div>
     </div>
 
-    <div class="md-loading-scrim" data-loading hidden>
-      <div class="md-card md-card-elevated loading-card">
-        <div class="md-circular-progress"></div>
-        <span class="md-typescale-title-medium">Fox AI is thinking...</span>
-        <span class="md-typescale-body-medium md-color-muted">Searching anime databases for matches</span>
+    <div class="dialog-scrim" id="library-edit-modal" style="display:none;">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="lib-edit-title">
+        <div class="dialog-header">
+          <h2 class="card-title" id="lib-edit-title">Edit Library Entry</h2>
+          <button class="icon-btn" data-action="close-library-edit" aria-label="Close dialog">
+            <span class="material-symbols-rounded">close</span>
+          </button>
+        </div>
+        <div class="dialog-content">
+          <div class="field field-outlined">
+            <label for="lib-edit-status">Status</label>
+            <select id="lib-edit-status">
+              <option value="plan_to_watch">Plan to Watch</option>
+              <option value="watching">Watching</option>
+              <option value="completed">Completed</option>
+              <option value="on_hold">On Hold</option>
+              <option value="dropped">Dropped</option>
+            </select>
+          </div>
+          <div class="field field-outlined">
+            <label for="lib-edit-rating">Rating (0-10)</label>
+            <input type="number" id="lib-edit-rating" min="0" max="10" step="0.5" placeholder="Optional">
+          </div>
+          <div class="field field-outlined">
+            <label for="lib-edit-progress">Progress (episodes watched)</label>
+            <input type="number" id="lib-edit-progress" min="0" step="1" placeholder="0">
+          </div>
+          <div class="field field-outlined">
+            <label for="lib-edit-notes">Notes</label>
+            <textarea id="lib-edit-notes" rows="3" placeholder="Your thoughts..."></textarea>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <button class="btn btn-text color-error" id="lib-edit-remove">Remove</button>
+          <div class="flex-grow"></div>
+          <button class="btn btn-outlined" data-action="close-library-edit">Cancel</button>
+          <button class="btn btn-filled" id="lib-edit-save">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="dialog-scrim" id="import-modal" style="display:none;">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
+        <div class="dialog-header">
+          <h2 class="card-title" id="import-modal-title">Import Library</h2>
+          <button class="icon-btn" data-action="close-import" aria-label="Close dialog">
+            <span class="material-symbols-rounded">close</span>
+          </button>
+        </div>
+        <div class="dialog-content">
+          <p class="muted" style="margin-bottom: 16px;">Paste your exported library JSON below, or select a file.</p>
+          <div class="field field-outlined">
+            <label for="import-mode">Import Mode</label>
+            <select id="import-mode">
+              <option value="merge">Merge (skip duplicates by title)</option>
+              <option value="replace">Replace (clear library first)</option>
+            </select>
+          </div>
+          <div class="field field-outlined">
+            <label for="import-text">Library JSON</label>
+            <textarea id="import-text" rows="8" placeholder='[{"title": "...", "status": "watching", ...}]'></textarea>
+          </div>
+          <input type="file" id="import-file" accept=".json" style="display:none;">
+          <button class="btn btn-outlined" id="import-choose-file">
+            <span class="material-symbols-rounded">attach_file</span> Choose File
+          </button>
+        </div>
+        <div class="dialog-actions">
+          <button class="btn btn-outlined" data-action="close-import">Cancel</button>
+          <button class="btn btn-filled" data-action="execute-import">Import</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="loading-scrim" data-loading hidden>
+      <div class="card card-elevated loading-card">
+        <div class="circular-progress"></div>
+        <span class="loading-title">Smart Fox is thinking...</span>
+        <span class="loading-subtitle muted" id="loading-subtitle">Searching anime databases for matches</span>
       </div>
     </div>
     

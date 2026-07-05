@@ -246,7 +246,7 @@ def extract_image(images: dict[str, Any]) -> str | None:
         for key in ("large_image_url", "image_url"):
             url = img_data.get(key)
             if url:
-                return url
+                return url.replace("http://", "https://")
     return None
 
 

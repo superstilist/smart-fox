@@ -60,6 +60,7 @@ class Settings:
     local_ai_base_url: str = "http://127.0.0.1:1234"
     local_ai_api_key: str = "local-key"
     local_ai_model: str = "google/gemma-4-e2b"
+    local_ai_parallel_slots: int = 1   # how many concurrent requests LM Studio can handle (set n_parallel in LM Studio)
 
     openrouter_model: str = "nvidia/nemotron-3-super-120b-a12b:free"
     openrouter_fallback_models: str = "google/gemma-4-26b-a4b-it:free,meta-llama/llama-3.3-70b-instruct:free,qwen/qwen3-next-80b-a3b-instruct:free,openai/gpt-oss-120b:free"

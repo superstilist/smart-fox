@@ -291,6 +291,52 @@ async def _call_chat(
     raise last_error or RuntimeError("LM Studio call failed after retries.")
 
 
+async def _call_chat_parallel(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+    slots: int = 1,
+    max_retries: int = 2,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if slots <= 1:
+        return await _call_chat(client, url, headers, payload, max_retries)
+
+    import copy
+
+    async def _single_call(idx: int) -> tuple[dict[str, Any], dict[str, Any]]:
+        p = copy.deepcopy(payload)
+        p["seed"] = idx
+        return await _call_chat(client, url, headers, p, max_retries)
+
+    tasks = [_single_call(i) for i in range(slots)]
+    done, pending = await asyncio.wait(
+        [asyncio.create_task(t) for t in tasks],
+        timeout=120,
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    for p in pending:
+        p.cancel()
+
+    if not done:
+        raise RuntimeError("All parallel LM Studio requests failed or timed out.")
+
+    best_result: dict[str, Any] = {}
+    best_usage: dict[str, Any] = {}
+    for task in done:
+        try:
+            result, usage = task.result()
+            if result.get("top_50") or (not best_result):
+                best_result = result
+                best_usage = usage
+                if result.get("top_50"):
+                    break
+        except Exception:
+            continue
+
+    return best_result, best_usage
+
+
 async def _call_chat_streaming(
     client: httpx.AsyncClient,
     url: str,
@@ -412,7 +458,7 @@ async def recommend_with_local_ai(
             "temperature": settings.ai_temperature,
             "max_tokens": settings.ai_max_tokens,
         }
-        result, _ = await _call_chat(client, url, headers, payload, max_retries=settings.max_retries)
+        result, _ = await _call_chat_parallel(client, url, headers, payload, slots=settings.local_ai_parallel_slots, max_retries=settings.max_retries)
         return result
 
 
@@ -471,7 +517,7 @@ async def search_by_description(
             "temperature": 0.3,
             "max_tokens": settings.ai_max_tokens,
         }
-        result, _ = await _call_chat(client, url, headers, payload, max_retries=settings.max_retries)
+        result, _ = await _call_chat_parallel(client, url, headers, payload, slots=settings.local_ai_parallel_slots, max_retries=settings.max_retries)
         return result
 
 
