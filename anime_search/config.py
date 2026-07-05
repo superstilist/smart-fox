@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any, get_type_hints
@@ -11,6 +12,7 @@ import httpx
 CONFIG_FILE = Path("settings.json")
 APIKEY_CONF = Path("apikey.conf")
 SESSIONS_DIR = Path(".sessions")
+TOKEN_USAGE_FILE = Path(".token_usage.json")
 
 SENSITIVE_KEYS = {"ai_api_key", "local_ai_api_key"}
 
@@ -80,6 +82,9 @@ class Settings:
     web_host: str = "127.0.0.1"
     web_port: int = 5000
     web_debug: bool = False
+
+    token_budget: int = 100000
+    token_warning_threshold: float = 0.8
 
     default_content_filter: str = "sfw"
 
@@ -238,9 +243,6 @@ def load_settings() -> Settings:
 
     settings = Settings.from_dict(overrides) if overrides else Settings()
 
-    if settings.ai_provider == "local" and settings.ai_api_key:
-        settings = Settings.from_dict({**settings.to_dict(), "ai_provider": "openrouter"})
-
     return settings
 
 
@@ -251,8 +253,10 @@ def save_settings(settings: Settings) -> None:
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False, default=str)
     active = get_active_session_name()
-    if active:
-        save_session(active, settings)
+    if not active:
+        active = "default"
+        set_active_session_name(active)
+    save_session(active, settings)
 
 
 def list_sessions() -> list[dict[str, Any]]:
@@ -333,3 +337,47 @@ def get_active_session_name() -> str:
 def set_active_session_name(name: str) -> None:
     active = Path(".active_session")
     active.write_text(name.strip(), encoding="utf-8")
+
+
+def load_token_usage() -> dict[str, Any]:
+    if TOKEN_USAGE_FILE.is_file():
+        try:
+            with open(TOKEN_USAGE_FILE, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_token_usage(data: dict[str, Any]) -> None:
+    with open(TOKEN_USAGE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def record_token_usage(session_name: str, usage: dict[str, Any]) -> None:
+    data = load_token_usage()
+    session = data.get(session_name, {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "calls": 0,
+    })
+    session["prompt_tokens"] += usage.get("prompt_tokens", 0)
+    session["completion_tokens"] += usage.get("completion_tokens", 0)
+    session["total_tokens"] += usage.get("total_tokens", 0)
+    session["calls"] += 1
+    session["last_used"] = time.time()
+    data[session_name] = session
+    save_token_usage(data)
+
+
+def get_session_token_usage(session_name: str) -> dict[str, Any]:
+    data = load_token_usage()
+    return data.get(session_name, {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "calls": 0,
+        "budget": 100000,
+        "budget_used_pct": 0.0,
+    })

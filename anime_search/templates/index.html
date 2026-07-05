@@ -94,7 +94,10 @@
             <aside class="profile-sidebar">
               <div class="poster-container md-elevation-3">
                 {% if profile.media.poster %}
-                  <img src="{{ profile.media.poster }}" alt="{{ profile.titles.all[0] if profile.titles.all else query }} poster">
+                  <img src="{{ profile.media.poster }}" alt="{{ profile.titles.all[0] if profile.titles.all else query }} poster" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                  <div class="poster-placeholder" style="display: none;">
+                    <span class="material-symbols-rounded">image_not_supported</span>
+                  </div>
                 {% else %}
                   <div class="poster-placeholder">
                     <span class="material-symbols-rounded">image_not_supported</span>
@@ -193,7 +196,8 @@
                       <div class="character-item">
                         <div class="character-avatar">
                           {% if character.image %}
-                            <img src="{{ character.image }}" alt="{{ character.name }}">
+                            <img src="{{ character.image }}" alt="{{ character.name }}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            <span class="material-symbols-rounded" style="display: none;">person</span>
                           {% else %}
                             <span class="material-symbols-rounded">person</span>
                           {% endif %}
@@ -361,6 +365,23 @@
                 <label for="cfg-ai-timeout">Timeout (s)</label>
                 <input type="number" id="cfg-ai-timeout" min="10" max="600" step="10">
               </div>
+              <div class="md-text-field md-outlined">
+                <label for="cfg-token-budget">Token Budget</label>
+                <input type="number" id="cfg-token-budget" min="1000" step="1000">
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section" id="settings-token-section">
+            <h3 class="md-typescale-title-medium"><span class="material-symbols-rounded">monitoring</span> Token Economy</h3>
+            <div class="token-usage-bar">
+              <div class="token-usage-info">
+                <span id="token-usage-text" class="md-typescale-body-small">Tokens: loading...</span>
+                <span id="token-usage-pct" class="md-typescale-body-small token-usage-pct"></span>
+              </div>
+              <div class="token-usage-track">
+                <div id="token-usage-fill" class="token-usage-fill"></div>
+              </div>
             </div>
           </div>
 
@@ -382,7 +403,6 @@
           <div class="settings-status md-typescale-body-small" id="settings-status"></div>
           <button id="settings-reset" class="md-btn md-btn-text md-color-error">Reset</button>
           <button id="settings-test" class="md-btn md-btn-outlined">Test Connection</button>
-          <button id="settings-save" class="md-btn md-btn-filled">Save</button>
         </div>
       </div>
     </div>

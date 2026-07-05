@@ -70,10 +70,11 @@ function buildRecCard(item) {
   const matchReason = item.match_reason ? `<div class="rec-match-reason">${escapeHtml(item.match_reason)}</div>` : "";
   const weightedScore = item.weighted_score ? `<div class="rec-weighted-score">Weighted: ${item.weighted_score}</div>` : "";
   const posterSrc = item.poster || "";
+  const srcAttr = posterSrc ? `src="${posterSrc}"` : "";
   return `
     <div class="ai-rec-card" data-title="${item.title || ""}" data-rank="${item.rank || 0}" data-poster="${posterSrc}" onclick="showDetail('${escapedTitle}')">
       <div class="rec-poster-wrap">
-        <img class="rec-poster" src="${posterSrc}" alt="${item.title || ""}" loading="lazy" onerror="this.removeAttribute('src')">
+        <img class="rec-poster" ${srcAttr} alt="${item.title || ""}" loading="lazy" onerror="this.removeAttribute('src')">
         <div class="rec-poster-placeholder"><span>#${item.rank || "?"}</span></div>
         <div class="rec-rating-badge">${item.rating || "~"}</div>
       </div>
@@ -580,10 +581,18 @@ function openSettings() {
   if (!modal) return;
   modal.style.display = "flex";
   loadSettingsForm();
+  updateTokenUsage();
+  if (!window._tokenPollInterval) {
+    window._tokenPollInterval = setInterval(updateTokenUsage, 3000);
+  }
 }
 function closeSettings() {
   const modal = document.getElementById("settings-modal");
   if (modal) modal.style.display = "none";
+  if (window._tokenPollInterval) {
+    clearInterval(window._tokenPollInterval);
+    window._tokenPollInterval = null;
+  }
 }
 
 function loadSettingsForm() {
@@ -598,6 +607,7 @@ function loadSettingsForm() {
     setVal("cfg-ai-temperature", cfg.ai_temperature);
     setVal("cfg-ai-max-tokens", cfg.ai_max_tokens);
     setVal("cfg-ai-timeout", cfg.ai_timeout_seconds);
+    setVal("cfg-token-budget", cfg.token_budget);
     setVal("cfg-agent-max-iterations", cfg.agent_max_iterations);
     setVal("cfg-agent-max-tool-calls", cfg.agent_max_tool_calls);
 
@@ -638,6 +648,7 @@ function collectSettings() {
     ai_temperature: parseFloat(getVal("cfg-ai-temperature")) || 0.15,
     ai_max_tokens: parseInt(getVal("cfg-ai-max-tokens")) || 4096,
     ai_timeout_seconds: parseFloat(getVal("cfg-ai-timeout")) || 120,
+    token_budget: parseInt(getVal("cfg-token-budget")) || 100000,
     agent_max_iterations: parseInt(getVal("cfg-agent-max-iterations")) || 10,
     agent_max_tool_calls: parseInt(getVal("cfg-agent-max-tool-calls")) || 15,
   };
@@ -658,12 +669,35 @@ function saveSettings() {
     if (data.error) {
       if (status) { status.textContent = "Error: " + data.error; status.className = "settings-status error"; }
     } else {
-      if (status) { status.textContent = "Settings saved!"; status.className = "settings-status ok"; }
-      showToast("Settings saved");
+      if (status) { status.textContent = "Saved!"; status.className = "settings-status ok"; }
+      updateTokenUsage();
+      setTimeout(() => { if (status) status.textContent = ""; }, 2000);
     }
   }).catch(err => {
     if (status) { status.textContent = "Save failed: " + err; status.className = "settings-status error"; }
   });
+}
+
+function updateTokenUsage() {
+  fetch("/api/tokens/usage").then(r => r.json()).then(data => {
+    const textEl = document.getElementById("token-usage-text");
+    const pctEl = document.getElementById("token-usage-pct");
+    const fillEl = document.getElementById("token-usage-fill");
+    if (!textEl) return;
+    const total = data.total_tokens || 0;
+    const calls = data.calls || 0;
+    const budget = data.budget || 100000;
+    const pct = data.budget_used_pct || 0;
+    textEl.textContent = `${total.toLocaleString()} tokens used (${calls} calls)`;
+    pctEl.textContent = `${pct}%`;
+    if (fillEl) {
+      fillEl.style.width = `${Math.min(pct, 100)}%`;
+      fillEl.className = "token-usage-fill";
+      if (pct >= 100) fillEl.classList.add("over-budget");
+      else if (pct >= 80) fillEl.classList.add("near-budget");
+      else fillEl.classList.add("ok");
+    }
+  }).catch(() => {});
 }
 
 function testConnection() {
@@ -734,11 +768,9 @@ document.addEventListener("DOMContentLoaded", () => {
       document.querySelectorAll(".provider-card").forEach(c => c.classList.remove("active"));
       radio.closest(".provider-card")?.classList.add("active");
       toggleProviderSections(radio.value);
+      saveSettings();
     });
   });
-
-  const saveBtn = document.getElementById("settings-save");
-  if (saveBtn) saveBtn.addEventListener("click", saveSettings);
 
   const testBtn = document.getElementById("settings-test");
   if (testBtn) testBtn.addEventListener("click", testConnection);
@@ -748,6 +780,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const refreshBtn = document.getElementById("settings-refresh-models");
   if (refreshBtn) refreshBtn.addEventListener("click", refreshModelStatus);
+
+  let saveTimeout;
+  function onSettingsChange() {
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => saveSettings(), 500);
+  }
+
+  const settingsModal = document.getElementById("settings-modal");
+  if (settingsModal) {
+    settingsModal.addEventListener("input", onSettingsChange);
+    settingsModal.addEventListener("change", onSettingsChange);
+  }
 });
 
 /* ── Cancel Button ── */

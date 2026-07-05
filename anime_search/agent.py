@@ -131,9 +131,16 @@ async def auto_populate_kb() -> list[dict[str, Any]]:
 SYSTEM_PROMPT = """\
 You are an Anime & Manga Intelligent Information Agent.
 
-Your job is to retrieve, combine, and summarize anime/manga information using ANY available tools.
+Your job is to retrieve, combine, and summarize anime/manga information.
 
-You MUST NOT rely only on model memory.
+---
+
+## YOUR WORKFLOW (STRICT ORDER)
+
+1. **USE YOUR OWN BRAIN FIRST**: Before using any tools, search your own internal memory and knowledge base. Think deeply about the user's request, brainstorm potential anime matches, analyze themes, and generate initial ideas based on what you already know.
+2. **WEB SEARCH**: Once you have your initial ideas, use general search tools (`web_search_anime` for DuckDuckGo, `web_search_wikipedia`, `web_search_fandom`) to verify facts, find community consensus, and discover hidden gems you might have missed.
+3. **ANIME APIs**: After finding specific titles, you MUST use specialized APIs (`search_anime_multi_api`, `get_anime_details`) like AniList, Jikan (MAL), or Kitsu to get the exact, accurate, up-to-date details (score, episodes, precise genres, synopsis). Do not guess these details.
+4. **SYNTHESIZE & OPINE**: Finally, combine all this data. Generate your own unique commentary, critical opinions, and deep reasoning for why these anime are recommended. 
 
 ---
 
@@ -158,41 +165,10 @@ This saves tokens because the frontend can look up full data by ID.
 
 ---
 
-## MANDATORY FIRST STEP (ALREADY DONE)
+## PRE-SEARCHED WEB RESULTS
 
-The system has ALREADY searched DuckDuckGo, Wikipedia, and Fandom for your query.
-The results are provided below in the user message as "PRE-SEARCHED WEB RESULTS".
-
-You MUST analyze these web results FIRST before doing anything else.
-
----
-
-## DEEP REASONING & TOOL USAGE
-
-You MUST use your OWN BRAIN to perform deep reasoning. Do not jump to conclusions. Think step-by-step about what the user is asking for.
-Analyze the themes, tone, and character dynamics requested.
-If your internal memory is fuzzy, or if you need detailed reviews, ratings, or synopsis data, you MUST aggressively use your external tools!
-Specifically, use `web_search_anime(query)` to pull info from DuckDuckGo, and use `search_anime_multi_api(query)` or `get_anime_details(title)` to pull structured API data (AniList, Jikan, Kitsu).
-Never guess details if you can fetch them accurately.
-
----
-
-## AFTER ANALYZING WEB RESULTS
-
-You are FREE to use ANY tools you need:
-
-- web_search_anime(query) — Search DuckDuckGo (USE THIS ACTIVELY for detailed info)
-- web_search_wikipedia(query) — Search Wikipedia
-- web_search_fandom(query) — Search Fandom
-- search_anime_by_title(title) — Search MAL
-- search_anime_by_genre(genre) — Search by genre
-- search_anime_multi_api(query) — Search all APIs
-- search_by_description_keywords(desc) — Parse description
-- get_anime_details(title) — Get full details
-- semantic_search(query) — Semantic search
-- hybrid_recommend(query) — Hybrid recommendation
-
-Use whatever tools give you the BEST results. DO NOT rely solely on the PRE-SEARCHED results if they are insufficient.
+The system has ALREADY run an initial web search for your query. The results are provided below in the user message. 
+You can use these, but you are expected to do much more deep thinking and follow-up API searches.
 
 ---
 
@@ -201,12 +177,12 @@ Use whatever tools give you the BEST results. DO NOT rely solely on the PRE-SEAR
 As you work, output short commentary lines prefixed with "##" so the user can see your thinking:
 
 Example:
-## Searching DuckDuckGo for "space western anime"...
-## Found 5 results from DuckDuckGo
-## Searching Wikipedia for Cowboy Bebop...
-## Found detailed article on Wikipedia
-## Analyzing genre match: Action, Sci-Fi, Space
-## Rating Cowboy Bebop: 92% similarity
+## Accessing internal memory for "space western anime"...
+## I remember Cowboy Bebop and Trigun.
+## Using DuckDuckGo to find more recent examples...
+## Found 5 results. "Outlaw Star" looks relevant.
+## Using get_anime_details to fetch exact AniList scores...
+## Adding my own opinion: Cowboy Bebop's jazz soundtrack makes it the definitive choice.
 ## Adding [42] Cowboy Bebop to results
 
 ---
@@ -231,7 +207,7 @@ Always output structured result as JSON:
       "status": "Finished Airing",
       "episodes": 24,
       "synopsis": "Short clean synopsis",
-      "match_reason": "Why recommended",
+      "match_reason": "Why recommended (include your own opinion)",
       "rating": 85,
       "similarity_percentage": 84.9,
       "story_similarity": 80,
@@ -246,10 +222,10 @@ Always output structured result as JSON:
       "tone_similarity": 78,
       "audience_similarity": 82,
       "genre_blend_similarity": 88,
-      "overall_explanation": "Detailed explanation",
+      "overall_explanation": "Detailed explanation featuring your unique critical opinion",
       "confidence_score": 90,
       "connection_type": "genre",
-      "sources": ["duckduckgo", "wikipedia", "fandom", "jikan", "anilist"]
+      "sources": ["memory", "duckduckgo", "anilist"]
     }
   ]
 }
@@ -287,21 +263,16 @@ SIMILARITY SCALE:
 
 ## STRICT RULES
 
-- NEVER invent anime or manga
-- NEVER hallucinate ratings or episodes
-- If no data found → return empty top_50 with note
-- Always prefer real retrieved data over model knowledge
-- Be HARSH with ratings - most anime are NOT identical
-- Only 99-90% for truly identical anime
-- Most good matches are 70-80%, not 90%+
-- ALWAYS include index_id for each anime in top_50
+- NEVER invent anime or manga.
+- NEVER hallucinate API ratings or episodes (fetch them!).
+- ALWAYS form your own opinions based on the data.
+- ALWAYS include index_id for each anime in top_50.
 
 ---
 
 ## FINAL GOAL
 
-Combine web knowledge + API data + local database into the BEST possible recommendations.
-Use index IDs to save tokens. Output commentary so users see your thinking.
+Brainstorm using your own memory -> Verify with Web Search -> Fetch exact details with APIs -> Output JSON with your own deep opinions.
 
 Return ONLY the JSON response. No other text.
 """
@@ -320,6 +291,12 @@ class AnimeAgent:
         self._fallback_models = [
             m.strip() for m in self.settings.openrouter_fallback_models.split(",") if m.strip()
         ]
+        self._token_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "calls": 0,
+        }
 
     @classmethod
     def _check_cooldown(cls) -> float:
@@ -329,6 +306,11 @@ class AnimeAgent:
     @classmethod
     def _set_cooldown(cls, seconds: float = 30.0) -> None:
         cls._openrouter_cooldown_until = time.time() + seconds
+
+    def _with_usage(self, result: dict[str, Any]) -> dict[str, Any]:
+        result["token_usage"] = dict(self._token_usage)
+        result["token_budget"] = self.settings.token_budget
+        return result
 
     async def _llm_call(self, payload: dict[str, Any], on_commentary: Any = None) -> dict[str, Any] | None:
         cooldown = self._check_cooldown()
@@ -357,7 +339,13 @@ class AnimeAgent:
                     response.raise_for_status()
                     self._current_model = model
                     all_429 = False
-                    return response.json()
+                    raw_data = response.json()
+                    usage = raw_data.get("usage", {})
+                    self._token_usage["prompt_tokens"] += usage.get("prompt_tokens", 0)
+                    self._token_usage["completion_tokens"] += usage.get("completion_tokens", 0)
+                    self._token_usage["total_tokens"] += usage.get("total_tokens", 0)
+                    self._token_usage["calls"] += 1
+                    return raw_data
                 except httpx.HTTPStatusError:
                     raise
                 except Exception as exc:
@@ -483,7 +471,7 @@ class AnimeAgent:
                         if on_commentary:
                             await on_commentary(f"## Final result: {len(result['top_50'])} anime found")
                         result["commentary"] = accumulated_text.split("\n")
-                        return result
+                        return self._with_usage(result)
                 break
 
             if total_tool_calls >= self.settings.agent_max_tool_calls:
@@ -539,9 +527,9 @@ class AnimeAgent:
         if self.tool_calls_log:
             if on_commentary:
                 await on_commentary("## All models rate-limited. Using tool results directly.")
-            return self._build_top50_from_tool_calls(accumulated_text, self.tool_calls_log)
+            return self._with_usage(self._build_top50_from_tool_calls(accumulated_text, self.tool_calls_log))
 
-        return await self._force_final_response(messages, accumulated_text, on_commentary)
+        return self._with_usage(await self._force_final_response(messages, accumulated_text, on_commentary))
 
     async def _force_final_response(
         self,
@@ -582,7 +570,7 @@ class AnimeAgent:
         result = self._parse_final_response(accumulated_text, accumulated_text)
         if not result.get("top_50"):
             result = self._build_top50_from_tool_calls(accumulated_text)
-        return result
+        return self._with_usage(result)
 
     _NON_ANIME_TYPES = {"special", "music", "pv", "cm"}
     _JUNK_TITLE_PATTERNS = re.compile(
