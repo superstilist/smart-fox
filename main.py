@@ -21,6 +21,9 @@ from anime_search.config import (
     rename_session,
     get_active_session_name,
     set_active_session_name,
+    load_token_usage,
+    record_token_usage,
+    get_session_token_usage,
 )
 from anime_search.engine import AnimeSearchEngine, _get_task, cancel_task, cleanup_old_tasks
 
@@ -32,6 +35,16 @@ POSTER_CACHE_TTL = 86400
 
 def run_async(coro: Any) -> Any:
     return asyncio.run(coro)
+
+
+def _record_if_usage(recommendation: dict[str, Any] | None) -> None:
+    if not recommendation:
+        return
+    usage = recommendation.get("token_usage")
+    if usage:
+        active = get_active_session_name()
+        if active:
+            record_token_usage(active, usage)
 
 
 async def fetch_poster_batch(
@@ -192,7 +205,11 @@ def create_app() -> Flask:
         for key in SENSITIVE_KEYS:
             payload.pop(key, None)
         try:
-            new_settings = engine.settings.from_dict(payload)
+            # Merge incoming changes onto the current settings so omitted
+            # fields keep their existing values instead of reverting to defaults.
+            current = engine.settings.to_dict(include_secrets=True)
+            current.update(payload)
+            new_settings = engine.settings.from_dict(current)
             validation_error = new_settings.validate_ai_provider()
             if validation_error:
                 return jsonify({"error": validation_error}), 400
@@ -200,8 +217,10 @@ def create_app() -> Flask:
             save_settings(settings)
             engine = AnimeSearchEngine(settings)
             active = get_active_session_name()
-            if active:
-                save_session(active, settings)
+            if not active:
+                from anime_search.config import auto_init_session as _ais
+                active = _ais(settings)
+            save_session(active, settings)
             return jsonify({"status": "ok", "config": engine.settings.to_dict(include_secrets=False)})
         except Exception as exc:
             log.error("Config update failed: %s", exc)
@@ -274,6 +293,7 @@ def create_app() -> Flask:
                     "source_title": recommendation.get("source_title", ""),
                     "engine": recommendation.get("engine", "agent"),
                 }
+        _record_if_usage(recommendation)
         return jsonify({
             "task_id": task_id,
             "status": task.get("status", "unknown"),
@@ -324,6 +344,7 @@ def create_app() -> Flask:
                         if recommendation:
                             try:
                                 json.dumps(recommendation, default=str)
+                                _record_if_usage(recommendation)
                                 payload["recommendation"] = recommendation
                             except Exception:
                                 payload["recommendation"] = {
@@ -439,6 +460,23 @@ def create_app() -> Flask:
             "model": engine.settings.local_ai_model,
             "cache": engine.cache.get_stats(),
             "rate_limits": engine._limiter.get_status(),
+        })
+
+    @app.get("/api/tokens/usage")
+    def api_tokens_usage() -> Any:
+        active = get_active_session_name()
+        usage = load_token_usage()
+        session_usage = usage.get(active, {}) if active else {}
+        budget = engine.settings.token_budget
+        total = session_usage.get("total_tokens", 0)
+        return jsonify({
+            "session": active or "",
+            "prompt_tokens": session_usage.get("prompt_tokens", 0),
+            "completion_tokens": session_usage.get("completion_tokens", 0),
+            "total_tokens": total,
+            "calls": session_usage.get("calls", 0),
+            "budget": budget,
+            "budget_used_pct": round(total / budget * 100, 1) if budget else 0.0,
         })
 
     @app.post("/api/test-connection")

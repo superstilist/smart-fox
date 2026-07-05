@@ -18,11 +18,11 @@ You are an elite anime recommendation engine. You receive a merged anime profile
 Analyze the profile and recommend similar anime.
 
 RULES:
-1. Use ONLY facts from the profile to make recommendations
-2. If the source has recommendations, prioritize those
-3. Rank by overall similarity: story, characters, themes, tone, genres
-4. Each recommendation MUST include a short explanation
-5. Return AT LEAST 3 recommendations (more is better)
+1. USE YOUR OWN BRAIN FIRST: Think deeply about what makes this anime unique.
+2. If the source profile has recommendations, use them as a starting point, but you MUST inject your own memory and critical opinions.
+3. Rank by overall similarity: story, characters, themes, tone, genres.
+4. Each recommendation MUST include a short explanation featuring your own personal critical opinion.
+5. Return AT LEAST 3 recommendations (more is better).
 6. Return ONLY valid JSON. No markdown, no text outside JSON.
 
 SCORING:
@@ -70,11 +70,12 @@ You are an anime discovery engine. The user describes what they want.
 Find anime that MATCH that description using your knowledge.
 
 RULES:
-1. Parse the description: genre, tone, setting, characters, themes
-2. Return anime that match ALL aspects
-3. Return AT LEAST 3 recommendations
-4. Each MUST explain WHY it matches
-5. Return ONLY valid JSON
+1. USE YOUR OWN BRAIN FIRST: Think deeply about the description and scan your internal memory for perfect matches.
+2. Parse the description: genre, tone, setting, characters, themes.
+3. Return anime that match ALL aspects.
+4. Each MUST explain WHY it matches, featuring your own critical opinion.
+5. Return AT LEAST 3 recommendations.
+6. Return ONLY valid JSON. No markdown, no text outside JSON.
 
 OUTPUT SCHEMA:
 {
@@ -242,13 +243,15 @@ async def _call_chat(
     headers: dict[str, str],
     payload: dict[str, Any],
     max_retries: int = 2,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     last_error: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
-            return parse_chat_completion_json(response.json())
+            raw_data = response.json()
+            usage = raw_data.get("usage", {})
+            return parse_chat_completion_json(raw_data), usage
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             if status == 400:
@@ -325,8 +328,8 @@ async def _call_chat_streaming(
                     continue
                 if "stream" in text:
                     payload.pop("stream", None)
-                    async for chunk in _call_chat(client, url, headers, payload, max_retries=0):
-                        yield json.dumps(chunk)
+                    result, _ = await _call_chat(client, url, headers, payload, max_retries=0)
+                    yield json.dumps(result)
                     return
                 raise
             if status >= 500 and attempt < max_retries:
@@ -409,7 +412,8 @@ async def recommend_with_local_ai(
             "temperature": settings.ai_temperature,
             "max_tokens": settings.ai_max_tokens,
         }
-        return await _call_chat(client, url, headers, payload, max_retries=settings.max_retries)
+        result, _ = await _call_chat(client, url, headers, payload, max_retries=settings.max_retries)
+        return result
 
 
 async def recommend_with_local_ai_streaming(
@@ -467,7 +471,8 @@ async def search_by_description(
             "temperature": 0.3,
             "max_tokens": settings.ai_max_tokens,
         }
-        return await _call_chat(client, url, headers, payload, max_retries=settings.max_retries)
+        result, _ = await _call_chat(client, url, headers, payload, max_retries=settings.max_retries)
+        return result
 
 
 async def agent_recommend(
